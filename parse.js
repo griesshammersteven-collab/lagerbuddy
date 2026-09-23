@@ -191,7 +191,8 @@ function parsePicklist(raw, fmt = raw) {
   if (!valid.length) throw pickErr('Keine gültige Zeile mit Artikelnummer und Menge gefunden.');
   const title = h > 0 ? raw.slice(0, h).flat().map(c => String(c).trim()).find(Boolean) || '' : '';
   // Titel wie "Pickliste B4 -> Bühl": das ist der Lagerplatz-Umzug für die ganze Liste (Von -> Nach).
-  const route = title.replace(/^pickliste\s*/i, '').match(/(.+?)\s*(?:->|-+>|→)\s*(.+)/);
+  // "\S*liste" statt "Pickliste": im Foto ist der linke Rand oft abgeschnitten ("ckliste B4 -> Bühl")
+  const route = title.replace(/^\S*liste\s+/i, '').match(/(.+?)\s*(?:->|-+>|→)\s*(.+)/);
   const von = route ? route[1].trim() : '', nach = route ? route[2].trim() : '';
   return { title, von, nach, lines: valid, skipped: lines.length - valid.length };
 }
@@ -211,48 +212,91 @@ function gebindeCount(required, gebinde) {
 // sich auf ein paar x-Positionen häufen, mit deutlichen Lücken dazwischen (Spaltenabstand) -- anders als
 // der enge, unregelmäßige Abstand zwischen Wörtern innerhalb einer Spalte/Zelle.
 function picklistGridFromWords(ocrLines, width) {
-  const words = [];
-  for (const l of ocrLines) for (const w of l.words || []) {
-    if (w.confidence < 40 || !w.text.trim()) continue; // Handschrift/Rauschen am Rand meist sehr unsicher
-    words.push({ text: w.text, x0: w.bbox.x0, x1: w.bbox.x1, y0: l.bbox?.y0 ?? w.bbox.y0 });
-  }
-  if (!words.length) return [];
-
-  // 1) Innerhalb jeder Zeile eng benachbarte Wörter (normaler Wortabstand) zu Textfragmenten zusammenfassen.
-  //    Das ist noch keine Spalte, nur "gehört zusammen" -- wichtig, damit ein langes erstes Wort einer Zelle
-  //    ("Artikelnummer PFL") das zweite Wort nicht allein über dessen x0 in die falsche Spalte rutschen lässt.
-  const byLine = new Map();
-  for (const w of words) { if (!byLine.has(w.y0)) byLine.set(w.y0, []); byLine.get(w.y0).push(w); }
-  const localGap = width * 0.012; // normaler Wortabstand bleibt klar darunter
+  // 1) Innerhalb jeder OCR-Zeile eng benachbarte Wörter (normaler Wortabstand) zu Textfragmenten zusammenfassen,
+  //    damit ein langes erstes Wort einer Zelle das zweite nicht über dessen x0 in eine falsche Spalte schiebt.
+  //    Reine Strich-/Satzzeichen-Wörter sind meist Tabellenlinien ("|", "—") und fliegen raus ("->" bleibt).
+  const localGap = width * 0.012;
   const frags = [];
-  for (const [y0, ws] of byLine) {
-    ws.sort((a, b) => a.x0 - b.x0);
+  for (const l of ocrLines) {
+    const ws = (l.words || []).filter(w => w.confidence >= 40 && w.text.trim() && !/^[|¦![\]()—–_=~.,:;'"`]+$/.test(w.text.trim())) // Handschrift/Rauschen meist unsicher
+      .map(w => ({ text: w.text.trim(), x0: w.bbox.x0, x1: w.bbox.x1, y: w.bbox.y1 != null ? (w.bbox.y0 + w.bbox.y1) / 2 : (l.bbox?.y0 ?? w.bbox.y0) }))
+      .sort((a, b) => a.x0 - b.x0);
     let cur = null;
     for (const w of ws) {
-      if (cur && w.x0 - cur.x1 <= localGap) { cur.text += ' ' + w.text; cur.x1 = w.x1; }
-      else { cur = { text: w.text, x0: w.x0, x1: w.x1, y0 }; frags.push(cur); }
+      if (cur && w.x0 - cur.x1 <= localGap) { cur.text += ' ' + w.text; cur.x1 = w.x1; cur.ys.push(w.y); }
+      else { cur = { text: w.text, x0: w.x0, x1: w.x1, ys: [w.y] }; frags.push(cur); }
     }
   }
+  if (!frags.length) return [];
+  for (const f of frags) f.y = f.ys.reduce((s, y) => s + y, 0) / f.ys.length;
 
-  // 2) Spalten über alle Fragmente hinweg erkennen: deren linke Kanten häufen sich auf ein paar x-Positionen,
-  //    mit einer deutlich größeren Lücke dazwischen als der Wortabstand innerhalb einer Zelle.
+  // 2) Spalten: die linken Kanten häufen sich auf ein paar x-Positionen, mit deutlich größerer Lücke dazwischen.
   const xs = frags.map(f => f.x0).sort((a, b) => a - b);
-  const colGap = width * 0.05;
   const bounds = [];
-  for (let i = 1; i < xs.length; i++) if (xs[i] - xs[i - 1] > colGap) bounds.push((xs[i] + xs[i - 1]) / 2);
-  const colOf = x0 => bounds.filter(b => b < x0).length;
-  const nCols = bounds.length + 1;
+  for (let i = 1; i < xs.length; i++) if (xs[i] - xs[i - 1] > width * 0.05) bounds.push((xs[i] + xs[i - 1]) / 2);
+  for (const f of frags) f.col = bounds.filter(b => b < f.x0).length;
 
-  const rows = new Map(); // y0 der Zeile -> Map(Spalte -> Fragmente in Reihenfolge)
-  for (const f of frags) {
-    if (!rows.has(f.y0)) rows.set(f.y0, new Map());
-    const row = rows.get(f.y0), col = colOf(f.x0);
-    row.set(col, [...(row.get(col) || []), f.text]);
+  // 3) Zeilen NICHT über die Höhe bilden: ein schräg gehaltenes Handy lässt rechte Spalten eine halbe Zeile
+  //    tiefer liegen als links (Foto 23.09.2026). Stattdessen spaltenweise von oben nach unten lesen:
+  //    jede Artikelnummer startet eine Position, der n-te Wert in Charge/Menge gehört zur n-ten Position.
+  const byY = (a, b) => a.y - b.y;
+  const firstTok = s => s.split(/\s+/)[0];
+  const isArt = f => /^\d{3,}[A-Z0-9\-/.]*$/i.test(firstTok(f.text));
+  const anyHead = f => /^(artikel|bezeichnung|charge|lot|menge|best|einheit|anzahl|gewicht|gebinde|produktion|logistik)/.test(normH(f.text));
+  const colHead = f => /^(charge|lot|menge|einheit|anzahl|gewicht|bezeichnung|gebinde)/.test(normH(f.text));
+  // Ohne "Artikel…"-Überschrift ist es keine Pickliste (z. B. ein Etikett) -- tolerant gegen Lesefehler am Wortende
+  const artHead = frags.find(f => /^(artikel|artnr)/.test(normH(f.text)));
+  if (!artHead) return [];
+  const artCol = artHead.col, headY = artHead.y;
+
+  const recs = [];
+  for (const f of frags.filter(f => f.col === artCol && f.y > headY).sort(byY)) {
+    if (isArt(f)) recs.push({ y: f.y, art: firstTok(f.text), bez: [] });
+    else if (recs.length && !anyHead(f)) recs.at(-1).bez.push(f.text);
   }
-  return [...rows.entries()].sort((a, b) => a[0] - b[0]) // Zeilen von oben nach unten
-    .map(([, row]) => Array.from({ length: nCols }, (_, c) => (row.get(c) || []).join(' ')));
-}
+  const pitch = recs.length > 1 ? (recs.at(-1).y - recs[0].y) / (recs.length - 1) : Infinity;
 
+  const cols = [];
+  for (const c of [...new Set(frags.map(f => f.col))].filter(c => c !== artCol).sort((a, b) => a - b)) {
+    const inCol = frags.filter(f => f.col === c);
+    const head = inCol.filter(colHead).sort((a, b) => Math.abs(a.y - headY) - Math.abs(b.y - headY))[0];
+    const vals = inCol.filter(f => f.y > (head ? head.y : headY) && !anyHead(f)).sort(byY);
+    const main = recs.map(() => ''), second = recs.map(() => '');
+    const add = (arr, k, t) => { arr[k] = arr[k] ? arr[k] + ' ' + t : t; };
+    const withDigit = vals.filter(f => /\d/.test(f.text));
+    if (vals.length === recs.length) vals.forEach((f, k) => { main[k] = f.text; });
+    else if (withDigit.length === recs.length) {
+      // Charge-Spalte mit Hinweisen dazwischen ("GEKÜHLTE WARE"): Werte mit Ziffern sind die Chargen,
+      // Text ohne Ziffern ist der Hinweis zur Position davor
+      let k = -1;
+      for (const f of vals) if (/\d/.test(f.text)) main[++k] = f.text; else add(second, Math.max(k, 0), f.text);
+    } else {
+      // ponytail: Anzahl passt nicht (leere/ungelesene Zelle) -> nach Höhe: letzte Position, die nicht deutlich
+      // tiefer steht. Bei stark schrägem Foto kann das danebenliegen; der Prüfhinweis nach dem Import bleibt.
+      for (const f of vals) {
+        const k = Math.max(0, recs.findLastIndex(r => r.y <= f.y + pitch * 0.3));
+        if (main[k]) add(second, k, f.text); else main[k] = f.text;
+      }
+    }
+    cols.push({ name: head ? head.text : '', main, second, qtyLike: vals.filter(f => /^\d+([.,]\d+)?\s*(kg|stk|stück)?\.?$/i.test(f.text)).length });
+  }
+  // Überschrift "Menge" nicht gelesen? Dann ist es die Spalte, die fast nur aus Mengen besteht.
+  if (!cols.some(c => /^(menge|anzahl|gewicht)/.test(normH(c.name)))) {
+    const q = cols.filter(c => !c.name && c.qtyLike >= recs.length / 2).sort((a, b) => b.qtyLike - a.qtyLike)[0];
+    if (q) q.name = 'Menge';
+  }
+  const named = cols.filter(c => c.name);
+
+  const above = frags.filter(f => f.y < headY).sort((a, b) => a.y - b.y || a.x0 - b.x0);
+  const title = (above.find(f => /->|→/.test(f.text)) || above[0])?.text;
+  const rows = title ? [[title]] : [];
+  rows.push(['Artikelnummer', ...named.map(c => c.name)]);
+  recs.forEach((r, k) => {
+    rows.push([r.art, ...named.map(c => c.main[k])]);
+    rows.push([r.bez.join(' '), ...named.map(c => c.second[k])]);
+  });
+  return rows;
+}
 // Pickliste-Modus: Barcodes gegen die Liste abgleichen statt nur die Ziffernlänge zu raten.
 // Die Pickliste weiß, welche Artikelnummern und Chargen vorkommen, das ist zuverlässiger.
 function applyPicklist(r, codes, lines) {
