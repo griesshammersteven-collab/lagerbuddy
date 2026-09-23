@@ -1,7 +1,7 @@
 'use strict';
 /* LagerBuddy: Etikett fotografieren -> Barcodes + Text lokal auf dem Handy lesen -> Liste -> Excel.
    Alle Bibliotheken liegen in vendor/, kein Bild und keine Nummer verlässt das Gerät. */
-const APP_VERSION = '2026-09-23.3'; // bei JEDER Veröffentlichung erhöhen, genauso wie ?v= in index.html
+const APP_VERSION = '2026-09-23.4'; // bei JEDER Veröffentlichung erhöhen, genauso wie ?v= in index.html
 const LOCAL = new URL('vendor/', location.href).href;
 const KEY = 'lagerbuddy_v1';
 const KEY_PICK = 'lagerbuddy_pick_v1';
@@ -464,8 +464,7 @@ async function applyUpdate() {
     // frische Seite direkt in den Cache legen, sonst zeigt der Service Worker beim Neuladen noch die alte
     const fresh = await fetch('index.html?nocache=' + Date.now(), { cache: 'no-store' });
     if ('caches' in window && fresh.ok) {
-      const k = (await caches.keys()).find(x => x.startsWith('lagerbuddy-'));
-      if (k) {
+      for (const k of (await caches.keys()).filter(x => x.startsWith('lagerbuddy-'))) { // beim SW-Wechsel kurz zwei Stände
         const c = await caches.open(k);
         await c.put(new Request(new URL('index.html', location.href)), fresh.clone());
         await c.put(new Request(new URL('./', location.href)), fresh.clone());
