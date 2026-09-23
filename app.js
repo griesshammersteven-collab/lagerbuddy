@@ -1,7 +1,16 @@
 'use strict';
 /* LagerBuddy: Etikett fotografieren -> Barcodes + Text lokal auf dem Handy lesen -> Liste -> Excel.
    Alle Bibliotheken liegen in vendor/, kein Bild und keine Nummer verlässt das Gerät. */
-const APP_VERSION = '2026-09-23.13'; // bei JEDER Veröffentlichung erhöhen, genauso wie ?v= in index.html
+const APP_VERSION = '2026-09-23.14'; // bei JEDER Veröffentlichung erhöhen, genauso wie ?v= in index.html
+// Alte index.html (CDN/Offline-Speicher) mit neuerem app.js-Inhalt: dann fehlen Knöpfe und der Start bricht ab.
+// Einmal frisch laden (eindeutige URL geht am CDN vorbei), bevor irgendetwas verdrahtet wird.
+{
+  const v = (document.currentScript?.src.match(/[?&]v=([\w.-]+)/) || [])[1];
+  if (v && v !== APP_VERSION && !/[?&]frisch=/.test(location.search)) { // nur einmal, keine Schleife
+    location.replace(location.pathname + '?frisch=' + Date.now());
+    throw new Error('Versionsmix, lade frisch');
+  }
+}
 const LOCAL = new URL('vendor/', location.href).href;
 const KEY = 'lagerbuddy_v1';
 const KEY_PICK = 'lagerbuddy_pick_v1';

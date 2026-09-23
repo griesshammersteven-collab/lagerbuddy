@@ -2,10 +2,14 @@
 const CACHE = 'lagerbuddy-v2'; // neuer Name räumt beim Aktivieren alte Stände weg
 const SHELL = ['./', './index.html', './manifest.webmanifest', './icon-192.png', './icon-512.png', './icon.svg'];
 
-// cache:'reload' holt frisch vom Server. Ohne das kann addAll eine bis zu 10 Min. alte Kopie aus dem
-// Browser-HTTP-Cache (GitHub Pages: max-age=600) in den Offline-Speicher legen.
+// Eigene Dateien immer am GitHub-Pages-CDN vorbei holen (?sw= macht die URL einmalig): das CDN liefert nach
+// einem Deploy bis zu 10 Min. die alte index.html, app.js?v=alt aber schon mit NEUEM Inhalt (Query wird ignoriert).
+// Landet dieses Paar im Offline-Speicher, sucht der neue Code Knöpfe, die die alte Seite nicht hat -> Absturz.
+const bust = u => { const x = new URL(u, location.href); x.searchParams.set('sw', Date.now()); return x; };
 self.addEventListener('install', e => {
-  e.waitUntil(caches.open(CACHE).then(c => c.addAll(SHELL.map(u => new Request(u, { cache: 'reload' })))).then(() => self.skipWaiting()));
+  e.waitUntil(caches.open(CACHE).then(c => Promise.all(SHELL.map(u => fetch(bust(u), { cache: 'no-store' })
+    .then(r => { if (!r.ok) throw new Error('Laden fehlgeschlagen: ' + u); return c.put(u, r); }))))
+    .then(() => self.skipWaiting()));
 });
 self.addEventListener('activate', e => {
   e.waitUntil(caches.keys().then(ks => Promise.all(ks.filter(k => k !== CACHE).map(k => caches.delete(k)))).then(() => self.clients.claim()));
@@ -26,8 +30,7 @@ self.addEventListener('fetch', e => {
   }
   e.respondWith(
     caches.match(e.request).then(cached => {
-      // no-cache: beim Server nachfragen (billig per ETag), statt eine alte HTTP-Cache-Kopie als "neu" zu speichern
-      const fresh = fetch(e.request, { cache: 'no-cache' }).then(r => put(e.request, r)).catch(() => cached || caches.match('./index.html'));
+      const fresh = fetch(bust(e.request.url), { cache: 'no-store' }).then(r => put(e.request, r)).catch(() => cached || caches.match('./index.html'));
       if (cached) { e.waitUntil(fresh.catch(() => {})); return cached; }
       return fresh;
     })
