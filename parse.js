@@ -51,4 +51,48 @@ function parseLabel(lines, codes) {
   return r;
 }
 
-if (typeof module !== 'undefined') module.exports = { cleanLine, parseLabel };
+// Kopfzeile einer hochgeladenen Pickliste tolerant erkennen (Groß/Klein, Leerzeichen/Bindestrich egal).
+function findCol(headers, names) {
+  const norm = h => String(h).toLowerCase().replace(/[^a-zäöüß0-9]/g, '');
+  const set = new Set(names.map(norm));
+  return headers.find(h => set.has(norm(h)));
+}
+
+// rows: XLSX.utils.sheet_to_json(sheet, {defval:''}) -- ein Objekt pro Zeile, Schlüssel = Kopfzeile.
+// Erwartet eine Artikelnummer-Spalte plus entweder Menge+Einheit (wie der eigene Export) oder
+// getrennte Spalten Anzahl (Stück) / Gewicht (kg). Wirft eine Error mit deutschem Text bei Problemen.
+function parsePicklist(rows) {
+  if (!rows.length) throw new Error('Die Excel-Datei enthält keine Zeilen.');
+  const headers = Object.keys(rows[0]);
+  const colArt = findCol(headers, ['artikelnummer', 'artikel', 'artikelnr', 'artnr', 'artikel-nr']);
+  const colMenge = findCol(headers, ['menge', 'mengeprogebinde']);
+  const colEinheit = findCol(headers, ['einheit', 'me']);
+  const colAnzahl = findCol(headers, ['anzahl', 'stück', 'stueck']);
+  const colGewicht = findCol(headers, ['gewicht', 'gewichtkg']);
+  const colBez = findCol(headers, ['bezeichnung1', 'bezeichnung']);
+  if (!colArt) throw new Error('Spalte "Artikelnummer" nicht gefunden.');
+  if (!colMenge && !colAnzahl && !colGewicht) throw new Error('Spalte "Menge", "Anzahl" oder "Gewicht" nicht gefunden.');
+
+  const num = v => parseFloat(String(v).replace(',', '.'));
+  const filled = v => String(v ?? '').trim() !== '';
+  const lines = [];
+  for (const row of rows) {
+    const artikel = String(row[colArt] ?? '').trim();
+    if (!artikel) continue;
+    let required, einheit;
+    if (colMenge && filled(row[colMenge])) {
+      required = num(row[colMenge]);
+      einheit = /kg/i.test(String(row[colEinheit] ?? '')) ? 'kg' : 'Stück';
+    } else if (colAnzahl && filled(row[colAnzahl])) {
+      required = num(row[colAnzahl]); einheit = 'Stück';
+    } else if (colGewicht && filled(row[colGewicht])) {
+      required = num(row[colGewicht]); einheit = 'kg';
+    } else continue; // Zeile ohne Menge überspringen
+    if (!(required > 0)) continue;
+    lines.push({ artikel, bez: colBez ? String(row[colBez] ?? '').trim() : '', required, einheit, picked: 0, scans: [] });
+  }
+  if (!lines.length) throw new Error('Keine gültige Zeile mit Artikelnummer und Menge gefunden.');
+  return lines;
+}
+
+if (typeof module !== 'undefined') module.exports = { cleanLine, parseLabel, parsePicklist };

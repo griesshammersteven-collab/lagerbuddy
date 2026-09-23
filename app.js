@@ -3,14 +3,22 @@
    Alle Bibliotheken liegen in vendor/, kein Bild und keine Nummer verlässt das Gerät. */
 const LOCAL = new URL('vendor/', location.href).href;
 const KEY = 'lagerbuddy_v1';
+const KEY_PICK = 'lagerbuddy_pick_v1';
 const FIELDS = ['artikel', 'bez1', 'bez2', 'charge'];
+const fmtN = n => n.toLocaleString('de-DE');
+// Pickliste ist noch nicht freigegeben: nur beim lokalen Testen sichtbar, auf der Live-Seite ausgeblendet.
+// Zum Freischalten diese Zeile auf true setzen.
+const PICK_ENABLED = ['localhost', '127.0.0.1'].includes(location.hostname);
 const CODE_OK = /^[0-9A-Z][0-9A-Z\-. $\/+%]{0,39}$/; // Code39-Zeichensatz, Länge gedeckelt gegen Unsinn auf einem manipulierten Etikett
 const $ = id => document.getElementById(id);
 
 try { navigator.storage?.persist?.(); } catch {} // hilft gegen Löschen durch den Browser nach längerer Nichtnutzung
 
 let list = load();
+let pick = loadPick();
+let mode = 'scan'; // 'scan' (freie Liste) oder 'pick' (Pickliste)
 let busy = false;
+let editIdx = null; // Index des Listeneintrags, der gerade bearbeitet wird
 let previewUrl = null;
 
 function load() {
@@ -21,6 +29,16 @@ function load() {
 }
 function save() {
   try { localStorage.setItem(KEY, JSON.stringify(list)); return true; }
+  catch { toast('Speichern fehlgeschlagen. Ist der Speicher voll?'); return false; }
+}
+function loadPick() {
+  try {
+    const v = JSON.parse(localStorage.getItem(KEY_PICK));
+    return v && typeof v === 'object' && Array.isArray(v.lines) ? v : null;
+  } catch { return null; }
+}
+function savePick() {
+  try { localStorage.setItem(KEY_PICK, JSON.stringify(pick)); return true; }
   catch { toast('Speichern fehlgeschlagen. Ist der Speicher voll?'); return false; }
 }
 
@@ -48,6 +66,10 @@ function render() {
   const ul = $('list');
   ul.replaceChildren(...list.map((e, i) => {
     const li = document.createElement('li'); li.className = 'card';
+    const entry = document.createElement('button');
+    entry.className = 'entry'; entry.type = 'button';
+    entry.setAttribute('aria-label', `Eintrag bearbeiten: ${e.artikel || '–'} / ${e.charge || '–'}`);
+    entry.onclick = () => showForm(e, null, i);
     const nums = document.createElement('div'); nums.className = 'nums';
     nums.append(e.artikel || '–', ' · Charge ');
     const b = document.createElement('b'); b.textContent = e.charge || '–'; nums.append(b);
@@ -61,12 +83,13 @@ function render() {
       if (!save()) { list.splice(i, 0, ...removed); return; }
       render();
     };
-    li.append(nums, del);
+    entry.append(nums);
     const mengeText = typeof e.menge === 'number' ? `${e.menge.toLocaleString('de-DE')} ${e.einheit}` : '';
     for (const t of [e.bez1, e.bez2, mengeText, new Date(e.ts).toLocaleString('de-DE')]) {
       if (!t) continue;
-      const d = document.createElement('div'); d.className = 'sub'; d.textContent = t; li.append(d);
+      const d = document.createElement('div'); d.className = 'sub'; d.textContent = t; entry.append(d);
     }
+    li.append(entry, del);
     return li;
   }).reverse());
   $('count').textContent = list.length ? `(${list.length})` : '';
@@ -74,8 +97,88 @@ function render() {
   $('export').disabled = $('clear').disabled = !list.length;
 }
 
+/* ---------- Modus (Erfassen / Pickliste) ---------- */
+function setMode(m) {
+  mode = m;
+  $('modeScan').classList.toggle('active', m === 'scan');
+  $('modeScan').setAttribute('aria-pressed', String(m === 'scan'));
+  $('modePick').classList.toggle('active', m === 'pick');
+  $('modePick').setAttribute('aria-pressed', String(m === 'pick'));
+  $('freeListView').hidden = m !== 'scan';
+  $('pickView').hidden = m !== 'pick';
+  $('exportBar').hidden = m !== 'scan';
+  $('pickBar').hidden = m !== 'pick';
+  if (m === 'pick') renderPick();
+}
+$('modeScan').onclick = () => setMode('scan');
+$('modePick').onclick = () => setMode('pick');
+
+/* ---------- Pickliste ---------- */
+function renderPick() {
+  const has = pick && pick.lines.length > 0;
+  $('pickEmpty').hidden = !!has;
+  $('pickBody').hidden = !has;
+  if (!has) return;
+  const total = pick.lines.length;
+  const done = pick.lines.filter(l => l.picked >= l.required).length;
+  const complete = done === total;
+  $('pickBanner').className = 'card pick-banner' + (complete ? ' done' : '');
+  $('pickBanner').textContent = complete ? '✓ Pickliste vollständig – Aufgabe erledigt' : `${done} von ${total} Artikeln fertig`;
+  $('pickName').textContent = pick.name;
+  $('pickList').replaceChildren(...pick.lines.map(l => {
+    const li = document.createElement('li'); li.className = 'card pick-line' + (l.picked >= l.required ? ' done' : '');
+    const head = document.createElement('div'); head.className = 'nums';
+    head.textContent = l.artikel + (l.bez ? ' · ' + l.bez : '');
+    const prog = document.createElement('div'); prog.className = 'sub';
+    prog.textContent = `${fmtN(l.picked)} / ${fmtN(l.required)} ${l.einheit}`;
+    li.append(head, prog);
+    return li;
+  }));
+}
+function addPick(e) {
+  const line = pick?.lines.find(l => l.artikel === e.artikel);
+  if (!line) { toast('Dieser Artikel steht nicht auf der Pickliste.'); return; }
+  if (line.einheit !== e.einheit) { toast(`Falsche Einheit: für diesen Artikel wird ${line.einheit} erwartet.`); return; }
+  const before = line.picked;
+  line.picked += e.menge;
+  line.scans.push({ ts: e.ts, menge: e.menge, charge: e.charge });
+  if (!savePick()) { line.picked = before; line.scans.pop(); return; }
+  renderPick(); closeForm();
+  toast(line.picked >= line.required
+    ? `Fertig: ${e.artikel} (${fmtN(line.picked)}/${fmtN(line.required)} ${line.einheit})`
+    : `Gebucht: ${fmtN(e.menge)} ${e.einheit} für ${e.artikel} (${fmtN(line.picked)}/${fmtN(line.required)})`);
+}
+async function loadPicklistFile(file) {
+  if (!file) return;
+  try {
+    await loadScript('xlsx.mini.min.js');
+    const buf = await file.arrayBuffer();
+    const wb = XLSX.read(buf, { type: 'array' });
+    const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { defval: '' });
+    const lines = parsePicklist(rows);
+    pick = { name: file.name, importedAt: Date.now(), lines };
+    if (!savePick()) { pick = null; return; }
+    renderPick();
+    toast(`Pickliste geladen: ${lines.length} Artikel.`);
+  } catch (err) {
+    console.error(err);
+    toast(err instanceof Error && err.message.length < 120 ? err.message : 'Excel-Datei konnte nicht gelesen werden.');
+  }
+}
+$('pickChoose').onclick = () => $('pickFile').click();
+$('pickReplace').onclick = () => $('pickFile').click();
+$('pickFile').onchange = ev => { const f = ev.target.files[0]; ev.target.value = ''; loadPicklistFile(f); };
+$('pickClear').onclick = () => {
+  if (!confirm('Pickliste verwerfen? Der Fortschritt geht verloren.')) return;
+  pick = null;
+  try { localStorage.removeItem(KEY_PICK); } catch {}
+  renderPick();
+};
+
 /* ---------- Formular ---------- */
-function showForm(r, file) {
+function showForm(r, file, idx = null) {
+  editIdx = idx;
+  $('formSubmit').textContent = idx !== null ? 'Änderung speichern' : mode === 'pick' ? 'Für Pickliste buchen' : 'Zur Liste hinzufügen';
   for (const f of FIELDS) {
     $(f).value = r[f] || '';
     const fromCode = (f === 'artikel' && r.artikelCode) || (f === 'charge' && r.chargeCode);
@@ -83,17 +186,18 @@ function showForm(r, file) {
     t.className = file ? 'tag ' + (fromCode ? 'ok' : 'check') : 'tag';
     t.textContent = file ? (fromCode ? 'aus Barcode' : 'bitte prüfen') : '';
   }
-  $('menge').value = '';
-  for (const el of document.getElementsByName('einheit')) el.checked = false;
+  $('menge').value = typeof r.menge === 'number' ? String(r.menge).replace('.', ',') : '';
+  for (const el of document.getElementsByName('einheit')) el.checked = el.value === r.einheit;
   if (previewUrl) URL.revokeObjectURL(previewUrl);
   previewUrl = file ? URL.createObjectURL(file) : null;
   $('preview').hidden = !file;
   if (file) $('preview').src = previewUrl; else $('preview').removeAttribute('src');
-  $('form').hidden = false; $('scan').hidden = true; $('bar').hidden = true;
+  $('form').hidden = false; $('scan').hidden = true; $('bar').hidden = true; $('modeSwitch').hidden = true;
   $('form').scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 function closeForm() {
-  $('form').hidden = true; $('scan').hidden = false; $('bar').hidden = false;
+  $('form').hidden = true; $('scan').hidden = false; $('bar').hidden = false; $('modeSwitch').hidden = !PICK_ENABLED;
+  editIdx = null;
   if (previewUrl) { URL.revokeObjectURL(previewUrl); previewUrl = null; }
   $('preview').removeAttribute('src');
 }
@@ -103,14 +207,23 @@ $('form').onsubmit = ev => {
   const e = { ts: Date.now() };
   for (const f of FIELDS) e[f] = $(f).value.trim().replace(/\s+/g, ' ');
   if (!e.artikel) { toast('Bitte eine Artikelnummer eintragen.'); $('artikel').focus(); return; }
-  const menge = $('menge').valueAsNumber;
+  const menge = parseFloat($('menge').value.trim().replace(',', '.')); // deutsches Komma zulassen, type=number kennt nur den Punkt
   if (!(menge > 0)) { toast('Bitte die Menge pro Gebinde eintragen.'); $('menge').focus(); return; }
   const einheit = document.querySelector('input[name=einheit]:checked')?.value;
   if (!einheit) { toast('Bitte Stück oder kg auswählen.'); return; }
   e.menge = menge; e.einheit = einheit;
-  if (!e.charge && !confirm('Die Charge ist leer. Trotzdem hinzufügen?')) return;
-  if (list.some(x => x.artikel === e.artikel && x.charge === e.charge) &&
+  const idx = editIdx;
+  if (idx === null && mode === 'pick') { addPick(e); return; }
+  if (!e.charge && !confirm(idx !== null ? 'Die Charge ist leer. Trotzdem speichern?' : 'Die Charge ist leer. Trotzdem hinzufügen?')) return;
+  if (list.some((x, j) => j !== idx && x.artikel === e.artikel && x.charge === e.charge) &&
       !confirm('Artikel und Charge sind schon in der Liste. Trotzdem nochmal hinzufügen?')) return;
+  if (idx !== null) {
+    const old = list[idx];
+    list[idx] = { ...e, ts: old.ts, geaendert: e.ts }; // Erfassungszeit bleibt, Änderung wird vermerkt
+    if (!save()) { list[idx] = old; return; }
+    render(); closeForm(); toast('Geändert.');
+    return;
+  }
   list.push(e);
   if (!save()) { list.pop(); return; }
   render(); closeForm(); toast('Hinzugefügt.');
@@ -260,4 +373,5 @@ $('clear').onclick = () => {
   list = []; save(); render();
 };
 
+$('modeSwitch').hidden = !PICK_ENABLED;
 render();
