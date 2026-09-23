@@ -51,6 +51,45 @@ function parseLabel(lines, codes) {
   return r;
 }
 
+/* ---------- Etikettfarbe ---------- */
+// Firmenregel: Artikelnummer-Präfix -> Pflichtfarbe des Etiketts.
+const LABEL_RULES = [['910', 'weiß'], ['911', 'gelb'], ['912', 'orange']];
+function requiredLabelColor(artikel) {
+  const a = String(artikel ?? '').trim();
+  const rule = LABEL_RULES.find(([p]) => a.startsWith(p));
+  return rule ? rule[1] : null;
+}
+
+// pixels: [[r,g,b], ...] Stichproben rund um den Barcode. Ergebnis 'weiß' | 'gelb' | 'orange' | null (unsicher).
+// Papier ist das Helle im Bild: dunkle Striche/Schrift und Karton fallen unten raus, Folien-Glanz (immer weiß)
+// oben. Gemessen wird das Band zwischen 50. und 80. Helligkeits-Perzentil.
+// ponytail: feste Schwellen für Sättigung/Farbton. Warmes Hallenlicht macht Weiß leicht gelblich -> dann
+// "unsicher" statt falscher Warnung. Mit echten Fotos der gelben/orangenen Etiketten nachjustieren (LABEL_HSV).
+const LABEL_HSV = { whiteMaxSat: 0.15, yellowHue: [40, 75], yellowMinSat: 0.22, orangeHue: [8, 40], orangeMinSat: 0.3 };
+function classifyLabelColor(pixels) {
+  if (!pixels || pixels.length < 20) return null;
+  const lum = ([r, g, b]) => 0.299 * r + 0.587 * g + 0.114 * b;
+  const sorted = pixels.slice().sort((a, b) => lum(a) - lum(b));
+  const band = sorted.slice(Math.floor(sorted.length * 0.5), Math.ceil(sorted.length * 0.8));
+  const med = i => { const v = band.map(p => p[i]).sort((a, b) => a - b); return v[v.length >> 1]; };
+  const [r, g, b] = [med(0), med(1), med(2)];
+  const max = Math.max(r, g, b), min = Math.min(r, g, b);
+  if (max < 90) return null; // zu dunkel, kein Etikett im Bild
+  const s = (max - min) / max;
+  let h = 0;
+  if (max !== min) {
+    if (max === r) h = 60 * (((g - b) / (max - min)) % 6);
+    else if (max === g) h = 60 * ((b - r) / (max - min) + 2);
+    else h = 60 * ((r - g) / (max - min) + 4);
+  }
+  if (h < 0) h += 360;
+  const T = LABEL_HSV;
+  if (s < T.whiteMaxSat) return 'weiß';
+  if (h >= T.yellowHue[0] && h <= T.yellowHue[1] && s >= T.yellowMinSat) return 'gelb';
+  if (h >= T.orangeHue[0] && h < T.orangeHue[1] && s >= T.orangeMinSat) return 'orange';
+  return null;
+}
+
 /* ---------- Pickliste ---------- */
 const normH = h => String(h ?? '').toLowerCase().replace(/[^a-zäöüß0-9]/g, '');
 const pickErr = m => Object.assign(new Error(m), { userMessage: true }); // erwartbarer Fehler: nur Toast, kein Konsolenfehler
@@ -144,4 +183,4 @@ function applyPicklist(r, codes, lines) {
   return out;
 }
 
-if (typeof module !== 'undefined') module.exports = { cleanLine, parseLabel, parsePicklist, applyPicklist, normArt, normCharge };
+if (typeof module !== 'undefined') module.exports = { cleanLine, parseLabel, parsePicklist, applyPicklist, normArt, normCharge, requiredLabelColor, classifyLabelColor };

@@ -1,7 +1,7 @@
 'use strict';
 /* LagerBuddy: Etikett fotografieren -> Barcodes + Text lokal auf dem Handy lesen -> Liste -> Excel.
    Alle Bibliotheken liegen in vendor/, kein Bild und keine Nummer verlässt das Gerät. */
-const APP_VERSION = '2026-09-23.2'; // bei JEDER Veröffentlichung erhöhen, genauso wie ?v= in index.html
+const APP_VERSION = '2026-09-23.3'; // bei JEDER Veröffentlichung erhöhen, genauso wie ?v= in index.html
 const LOCAL = new URL('vendor/', location.href).href;
 const KEY = 'lagerbuddy_v1';
 const KEY_PICK = 'lagerbuddy_pick_v1';
@@ -201,6 +201,8 @@ function showForm(r, file, idx = null) {
     t.className = file ? 'tag ' + (fromCode ? 'ok' : 'check') : 'tag';
     t.textContent = file ? (fromCode ? 'aus Barcode' : 'bitte prüfen') : '';
   }
+  formHasPhoto = !!file; formLabelColor = file ? r.labelColor || null : null;
+  renderLabelCheck();
   $('menge').value = typeof r.menge === 'number' ? String(r.menge).replace('.', ',') : '';
   for (const el of document.getElementsByName('einheit')) el.checked = el.value === r.einheit;
   if (previewUrl) URL.revokeObjectURL(previewUrl);
@@ -227,6 +229,9 @@ $('form').onsubmit = ev => {
   const einheit = document.querySelector('input[name=einheit]:checked')?.value;
   if (!einheit) { toast('Bitte Stück oder kg auswählen.'); return; }
   e.menge = menge; e.einheit = einheit;
+  const lc = labelCheckState();
+  if (lc.kind === 'bad' && !confirm(`Etikettfarbe passt nicht: Artikel ${e.artikel} braucht ein ${LABEL_ADJ[lc.need]} Etikett, erkannt wurde ${lc.got}. Trotzdem übernehmen?`)) return;
+  if (lc.kind === 'ok' || lc.kind === 'bad') e.etikett = lc.got; // erkannte Farbe mitschreiben
   const idx = editIdx;
   if (idx === null && mode === 'pick') { addPick(e); return; }
   if (!e.charge && !confirm(idx !== null ? 'Die Charge ist leer. Trotzdem speichern?' : 'Die Charge ist leer. Trotzdem hinzufügen?')) return;
@@ -234,7 +239,7 @@ $('form').onsubmit = ev => {
       !confirm('Artikel und Charge sind schon in der Liste. Trotzdem nochmal hinzufügen?')) return;
   if (idx !== null) {
     const old = list[idx];
-    list[idx] = { ...e, ts: old.ts, geaendert: e.ts }; // Erfassungszeit bleibt, Änderung wird vermerkt
+    list[idx] = { etikett: old.etikett, ...e, ts: old.ts, geaendert: e.ts }; // Erfassungszeit und erkannte Etikettfarbe bleiben
     if (!save()) { list[idx] = old; return; }
     render(); closeForm(); toast('Geändert.');
     return;
@@ -284,8 +289,8 @@ async function readCodes(canvas) {
   }
   return res.filter(b => b.isValid && b.text && CODE_OK.test(b.text.trim()))
     .map(b => {
-      const ys = [b.position.topLeft.y, b.position.topRight.y, b.position.bottomLeft.y, b.position.bottomRight.y];
-      return { text: b.text.trim(), top: Math.min(...ys), bottom: Math.max(...ys) };
+      const p = b.position, ys = [p.topLeft.y, p.topRight.y, p.bottomLeft.y, p.bottomRight.y], xs = [p.topLeft.x, p.topRight.x, p.bottomLeft.x, p.bottomRight.x];
+      return { text: b.text.trim(), top: Math.min(...ys), bottom: Math.max(...ys), left: Math.min(...xs), right: Math.max(...xs) };
     })
     .sort((a, b) => a.top - b.top);
 }
@@ -333,6 +338,56 @@ async function ocrLines(canvas, codes) {
   }
 }
 
+// Papierfarbe rund um die Barcodes stichprobenartig lesen (ohne Barcode: Bildmitte, dorthin zielt man).
+function sampleLabel(canvas, codes) {
+  let x0, x1, y0, y1;
+  if (codes.length) {
+    x0 = Math.min(...codes.map(c => c.left)); x1 = Math.max(...codes.map(c => c.right));
+    y0 = Math.min(...codes.map(c => c.top)); y1 = Math.max(...codes.map(c => c.bottom));
+    const w = x1 - x0, h = Math.max(y1 - y0, w * 0.3);
+    x0 -= w * 0.15; x1 += w * 0.15; y0 -= h * 0.15; y1 += h * 0.15;
+  } else {
+    x0 = canvas.width * 0.3; x1 = canvas.width * 0.7; y0 = canvas.height * 0.3; y1 = canvas.height * 0.7;
+  }
+  x0 = Math.max(0, Math.round(x0)); y0 = Math.max(0, Math.round(y0));
+  x1 = Math.min(canvas.width, Math.round(x1)); y1 = Math.min(canvas.height, Math.round(y1));
+  if (x1 - x0 < 10 || y1 - y0 < 10) return [];
+  const N = 80, c = document.createElement('canvas'); c.width = c.height = N;
+  const ctx = c.getContext('2d');
+  ctx.imageSmoothingEnabled = false; // echte Einzelpixel statt Mischwerte aus Strichen und Papier
+  ctx.drawImage(canvas, x0, y0, x1 - x0, y1 - y0, 0, 0, N, N);
+  const d = ctx.getImageData(0, 0, N, N).data, px = [];
+  for (let i = 0; i < d.length; i += 4) px.push([d[i], d[i + 1], d[i + 2]]);
+  c.width = c.height = 0;
+  return px;
+}
+
+// Hinweis im Formular: passt die erkannte Etikettfarbe zur Pflichtfarbe des Artikels?
+const LABEL_ADJ = { weiß: 'weißes', gelb: 'gelbes', orange: 'orangenes' };
+let formLabelColor = null; // erkannte Farbe des aktuellen Fotos (null = kein Foto oder unsicher)
+let formHasPhoto = false;
+function labelCheckState() {
+  const need = requiredLabelColor($('artikel').value);
+  if (!need) return { kind: 'none' };
+  if (!formHasPhoto) return { kind: 'info', need };
+  if (!formLabelColor) return { kind: 'unsure', need };
+  return { kind: formLabelColor === need ? 'ok' : 'bad', need, got: formLabelColor };
+}
+function renderLabelCheck() {
+  const s = labelCheckState(), el = $('labelCheck');
+  el.hidden = s.kind === 'none';
+  el.className = 'label-check ' + s.kind;
+  const up = s.need?.toUpperCase();
+  el.textContent = {
+    none: '',
+    info: `Etikett muss ${up} sein – bitte prüfen.`,
+    unsure: `Etikettfarbe nicht sicher erkannt – muss ${up} sein, bitte prüfen.`,
+    ok: `✓ Etikett ${s.need} – passt.`,
+    bad: `Achtung: Dieser Artikel braucht ein ${LABEL_ADJ[s.need]?.toUpperCase()} Etikett – erkannt: ${s.got}.`,
+  }[s.kind];
+}
+$('artikel').addEventListener('input', renderLabelCheck);
+
 async function scan(file) {
   if (!file || busy) return;
   if (file.size > 30 * 1024 * 1024) { toast('Foto ist zu groß (über 30 MB). Bitte erneut aufnehmen.'); return; }
@@ -345,6 +400,7 @@ async function scan(file) {
     let lines = [];
     try { setBusy(true, 'Text wird gelesen …'); lines = await ocrLines(canvas, codes); } catch (err) { console.warn(err); }
     let r = parseLabel(lines, codes.map(c => c.text));
+    try { r.labelColor = classifyLabelColor(sampleLabel(canvas, codes)); } catch (err) { console.warn(err); }
     if (mode === 'pick' && pick) r = applyPicklist(r, codes.map(c => c.text), pick.lines);
     showForm(r, file);
     if (!codes.length) toast('Kein Barcode erkannt. Bitte alle Felder prüfen.');

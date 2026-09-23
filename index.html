@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'sha256-D5/jUFJOfx1kFxp2pwZKI4m+KankXUFcSJV0Aw3dbZk='; img-src 'self' blob:; connect-src 'self' blob: data:; worker-src 'self' blob:; manifest-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'sha256-Wp7CONTfpiVwPQUECWNyJOA2hiz2wUgz2uval2bU26s='; img-src 'self' blob:; connect-src 'self' blob: data:; worker-src 'self' blob:; manifest-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'">
 <meta name="referrer" content="no-referrer">
 <meta name="theme-color" content="#0B4F82">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -54,6 +54,10 @@ h2{font-size:15px;color:var(--mute);font-weight:600;margin:24px 0 8px;text-trans
 .f input:focus{outline:2px solid var(--green);border-color:transparent}
 .tag{font-size:12px;font-weight:600;padding:2px 8px;border-radius:99px}
 .tag:empty{display:none}
+.label-check{padding:10px 12px;border-radius:10px;font-weight:600;font-size:15px;border:1px solid var(--line)}
+.label-check.ok{color:var(--ok);background:#5cb85c1f;border-color:#5cb85c66}
+.label-check.bad{color:#fff;background:var(--err);border-color:var(--err)}
+.label-check.unsure,.label-check.info{color:var(--warn);background:#e6953a1f;border-color:#e6953a66}
 .tag.ok{color:var(--ok);background:#5cb85c1f}.tag.check{color:var(--warn);background:#e6953a1f}
 #list{list-style:none;margin:0;padding:0;display:grid;gap:8px}
 #list li{display:grid;grid-template-columns:1fr auto auto;gap:4px;align-items:start}
@@ -103,6 +107,7 @@ h2{font-size:15px;color:var(--mute);font-weight:600;margin:24px 0 8px;text-trans
 
   <form id="form" class="card" hidden autocomplete="off">
     <img id="preview" alt="Foto des Etiketts" hidden>
+    <div id="labelCheck" class="label-check" role="status" hidden></div>
     <div class="f"><label for="artikel">Artikelnummer <span class="tag" id="t-artikel"></span></label><input id="artikel" name="artikel" autocapitalize="off" spellcheck="false" maxlength="64"></div>
     <div class="f"><label for="bez1">Bezeichnung 1 <span class="tag" id="t-bez1"></span></label><input id="bez1" name="bez1" maxlength="200"></div>
     <div class="f"><label for="bez2">Bezeichnung 2 <span class="tag" id="t-bez2"></span></label><input id="bez2" name="bez2" maxlength="200"></div>
@@ -151,7 +156,7 @@ h2{font-size:15px;color:var(--mute);font-weight:600;margin:24px 0 8px;text-trans
 </div>
 <div id="toast" role="status" aria-live="polite"></div>
 
-<script src="parse.js?v=2026-09-23.2"></script>
-<script src="app.js?v=2026-09-23.2"></script>
+<script src="parse.js?v=2026-09-23.3"></script>
+<script src="app.js?v=2026-09-23.3"></script>
 </body>
 </html>
