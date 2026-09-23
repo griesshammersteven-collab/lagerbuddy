@@ -191,6 +191,57 @@ function parsePicklist(raw, fmt = raw) {
   return { title, von, nach, lines: valid, skipped: lines.length - valid.length };
 }
 
+// Fotografierte Pickliste (Papier statt Excel) in dasselbe Zeilen/Spalten-Raster verwandeln, das
+// parsePicklist() schon von XLSX.utils.sheet_to_json(..., {header:1}) kennt -- dieselbe Auswertung
+// (Artikel-Erkennung, Charge/Menge, Von->Nach im Titel) läuft dann für beide Wege unverändert.
+// ocrLines: Tesseract-Zeilen mit Wort-Boxen (r.data.lines: [{words:[{text,confidence,bbox:{x0,...}}]}]),
+// width: Bildbreite in Pixeln (für die Mindest-Lücke zwischen Spalten).
+// Idee: Spalten eines gedruckten Tabellenrasters erkennt man daran, dass die linken Kanten der Wörter
+// sich auf ein paar x-Positionen häufen, mit deutlichen Lücken dazwischen (Spaltenabstand) -- anders als
+// der enge, unregelmäßige Abstand zwischen Wörtern innerhalb einer Spalte/Zelle.
+function picklistGridFromWords(ocrLines, width) {
+  const words = [];
+  for (const l of ocrLines) for (const w of l.words || []) {
+    if (w.confidence < 40 || !w.text.trim()) continue; // Handschrift/Rauschen am Rand meist sehr unsicher
+    words.push({ text: w.text, x0: w.bbox.x0, x1: w.bbox.x1, y0: l.bbox?.y0 ?? w.bbox.y0 });
+  }
+  if (!words.length) return [];
+
+  // 1) Innerhalb jeder Zeile eng benachbarte Wörter (normaler Wortabstand) zu Textfragmenten zusammenfassen.
+  //    Das ist noch keine Spalte, nur "gehört zusammen" -- wichtig, damit ein langes erstes Wort einer Zelle
+  //    ("Artikelnummer PFL") das zweite Wort nicht allein über dessen x0 in die falsche Spalte rutschen lässt.
+  const byLine = new Map();
+  for (const w of words) { if (!byLine.has(w.y0)) byLine.set(w.y0, []); byLine.get(w.y0).push(w); }
+  const localGap = width * 0.012; // normaler Wortabstand bleibt klar darunter
+  const frags = [];
+  for (const [y0, ws] of byLine) {
+    ws.sort((a, b) => a.x0 - b.x0);
+    let cur = null;
+    for (const w of ws) {
+      if (cur && w.x0 - cur.x1 <= localGap) { cur.text += ' ' + w.text; cur.x1 = w.x1; }
+      else { cur = { text: w.text, x0: w.x0, x1: w.x1, y0 }; frags.push(cur); }
+    }
+  }
+
+  // 2) Spalten über alle Fragmente hinweg erkennen: deren linke Kanten häufen sich auf ein paar x-Positionen,
+  //    mit einer deutlich größeren Lücke dazwischen als der Wortabstand innerhalb einer Zelle.
+  const xs = frags.map(f => f.x0).sort((a, b) => a - b);
+  const colGap = width * 0.05;
+  const bounds = [];
+  for (let i = 1; i < xs.length; i++) if (xs[i] - xs[i - 1] > colGap) bounds.push((xs[i] + xs[i - 1]) / 2);
+  const colOf = x0 => bounds.filter(b => b < x0).length;
+  const nCols = bounds.length + 1;
+
+  const rows = new Map(); // y0 der Zeile -> Map(Spalte -> Fragmente in Reihenfolge)
+  for (const f of frags) {
+    if (!rows.has(f.y0)) rows.set(f.y0, new Map());
+    const row = rows.get(f.y0), col = colOf(f.x0);
+    row.set(col, [...(row.get(col) || []), f.text]);
+  }
+  return [...rows.entries()].sort((a, b) => a[0] - b[0]) // Zeilen von oben nach unten
+    .map(([, row]) => Array.from({ length: nCols }, (_, c) => (row.get(c) || []).join(' ')));
+}
+
 // Pickliste-Modus: Barcodes gegen die Liste abgleichen statt nur die Ziffernlänge zu raten.
 // Die Pickliste weiß, welche Artikelnummern und Chargen vorkommen, das ist zuverlässiger.
 function applyPicklist(r, codes, lines) {
@@ -209,4 +260,4 @@ function applyPicklist(r, codes, lines) {
   return out;
 }
 
-if (typeof module !== 'undefined') module.exports = { cleanLine, parseLabel, parsePicklist, applyPicklist, normArt, normCharge, requiredLabelColor, classifyLabelColor };
+if (typeof module !== 'undefined') module.exports = { cleanLine, parseLabel, parsePicklist, applyPicklist, picklistGridFromWords, normArt, normCharge, requiredLabelColor, classifyLabelColor };

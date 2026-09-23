@@ -1,11 +1,10 @@
 'use strict';
 /* LagerBuddy: Etikett fotografieren -> Barcodes + Text lokal auf dem Handy lesen -> Liste -> Excel.
    Alle Bibliotheken liegen in vendor/, kein Bild und keine Nummer verlässt das Gerät. */
-const APP_VERSION = '2026-09-23.5'; // bei JEDER Veröffentlichung erhöhen, genauso wie ?v= in index.html
+const APP_VERSION = '2026-09-23.6'; // bei JEDER Veröffentlichung erhöhen, genauso wie ?v= in index.html
 const LOCAL = new URL('vendor/', location.href).href;
 const KEY = 'lagerbuddy_v1';
 const KEY_PICK = 'lagerbuddy_pick_v1';
-const KEY_PICKER = 'lagerbuddy_picker';
 const FIELDS = ['artikel', 'bez1', 'bez2', 'charge'];
 const fmtN = n => n.toLocaleString('de-DE');
 const PICK_ENABLED = true;
@@ -16,7 +15,7 @@ try { navigator.storage?.persist?.(); } catch {} // hilft gegen Löschen durch d
 
 let list = load();
 let pick = loadPick();
-let picker = (() => { try { return localStorage.getItem(KEY_PICKER) || ''; } catch { return ''; } })();
+let picker = '', role = ''; // erst nach der Auswahl am Zugangs-Gate gültig, siehe ganz unten
 let mode = 'scan'; // 'scan' (freie Liste) oder 'pick' (Pickliste)
 let busy = false;
 let editIdx = null; // Index des Listeneintrags, der gerade bearbeitet wird
@@ -113,7 +112,7 @@ function setMode(m) {
   $('freeListView').hidden = m !== 'scan';
   $('pickView').hidden = m !== 'pick';
   $('exportBar').hidden = m !== 'scan';
-  $('pickBar').hidden = m !== 'pick';
+  $('pickBar').hidden = m !== 'pick' || role !== 'master';
   if (m === 'pick') renderPick();
 }
 $('modeScan').onclick = () => setMode('scan');
@@ -162,6 +161,12 @@ function addPick(e) {
     ? `Fertig: ${e.artikel} (${fmtN(line.picked)}/${fmtN(line.required)} ${line.einheit})`
     : `Gebucht: ${fmtN(e.menge)} ${e.einheit} für ${e.artikel} (${fmtN(line.picked)}/${fmtN(line.required)})`);
 }
+function applyParsedPicklist({ title, von, nach, lines, skipped }, sourceName, hinweis) {
+  pick = { name: title ? `${title} · ${sourceName}` : sourceName, von, nach, importedAt: Date.now(), lines };
+  if (!savePick()) { pick = null; return; }
+  renderPick();
+  toast(`Pickliste geladen: ${lines.length} Artikel.` + (skipped ? ` ${skipped} Zeile(n) ohne Menge übersprungen.` : '') + (hinweis || ''));
+}
 async function loadPicklistFile(file) {
   if (!file) return;
   try {
@@ -172,14 +177,33 @@ async function loadPicklistFile(file) {
     // roh (Zahlen) und formatiert (Text wie "8 kg", führende Nullen) nebeneinander, gleiche Zeilen
     const raw = XLSX.utils.sheet_to_json(ws, { header: 1, raw: true, defval: '', blankrows: true });
     const fmt = XLSX.utils.sheet_to_json(ws, { header: 1, raw: false, defval: '', blankrows: true });
-    const { title, von, nach, lines, skipped } = parsePicklist(raw, fmt);
-    pick = { name: title ? `${title} · ${file.name}` : file.name, von, nach, importedAt: Date.now(), lines };
-    if (!savePick()) { pick = null; return; }
-    renderPick();
-    toast(`Pickliste geladen: ${lines.length} Artikel.` + (skipped ? ` ${skipped} Zeile(n) ohne Menge übersprungen.` : ''));
+    applyParsedPicklist(parsePicklist(raw, fmt), file.name);
   } catch (err) {
     if (!err?.userMessage) console.error(err);
     toast(err instanceof Error && err.message.length < 120 ? err.message : 'Excel-Datei konnte nicht gelesen werden.');
+  }
+}
+// Pickliste vom Papier fotografieren: Texterkennung liest die ganze Seite, die x-Position jedes Worts
+// verrät die Tabellenspalte (picklistGridFromWords), danach läuft dieselbe Auswertung wie beim Excel-Import.
+// Weniger zuverlässig als die Excel-Datei -- am Ende steht deshalb ein deutlicher Prüfhinweis.
+async function loadPicklistPhoto(file) {
+  if (!file || busy) return;
+  if (file.size > 30 * 1024 * 1024) { toast('Foto ist zu groß (über 30 MB). Bitte erneut aufnehmen.'); return; }
+  setBusy(true, 'Pickliste wird gelesen …');
+  let canvas;
+  try {
+    canvas = await toCanvas(file, 3000); // mehr Auflösung als beim Etikett: kleine Schrift über die ganze Seite
+    const worker = await getTessWorker();
+    const r = await withTimeout(worker.recognize(canvas), 120000, 'Texterkennung hat zu lange gedauert');
+    const grid = picklistGridFromWords(r.data.lines, canvas.width);
+    applyParsedPicklist(parsePicklist(grid, grid), file.name,
+      ' Bitte die Zeilen unten prüfen – von einem Foto liest die App nicht so zuverlässig wie aus Excel.');
+  } catch (err) {
+    if (!err?.userMessage) console.error(err);
+    toast(err instanceof Error && err.message.length < 120 ? err.message : 'Foto konnte nicht gelesen werden.');
+  } finally {
+    setBusy(false);
+    if (canvas) { canvas.width = 0; canvas.height = 0; }
   }
 }
 // Lagerplatz: von Excel-Titel vorbelegt ("Pickliste B4 -> Bühl"), hier jederzeit nachtragbar/korrigierbar
@@ -193,6 +217,8 @@ $('pickNach').addEventListener('change', savePickRoute);
 $('pickChoose').onclick = () => $('pickFile').click();
 $('pickReplace').onclick = () => $('pickFile').click();
 $('pickFile').onchange = ev => { const f = ev.target.files[0]; ev.target.value = ''; loadPicklistFile(f); };
+$('pickPhotoChoose').onclick = () => $('pickCam').click();
+$('pickCam').onchange = ev => { const f = ev.target.files[0]; ev.target.value = ''; loadPicklistPhoto(f); };
 $('pickClear').onclick = () => {
   if (!confirm('Pickliste verwerfen? Der Fortschritt geht verloren.')) return;
   pick = null;
@@ -274,9 +300,9 @@ function setBusy(on, msg) {
   $('camBtn').style.opacity = $('galBtn').style.opacity = on ? .45 : '';
 }
 
-async function toCanvas(file) {
+async function toCanvas(file, maxDim = 2000) {
   const bmp = await createImageBitmap(file); // dreht Handyfotos anhand der EXIF-Lage richtig
-  const k = Math.min(1, 2000 / Math.max(bmp.width, bmp.height));
+  const k = Math.min(1, maxDim / Math.max(bmp.width, bmp.height));
   const c = document.createElement('canvas');
   c.width = Math.round(bmp.width * k); c.height = Math.round(bmp.height * k);
   c.getContext('2d').drawImage(bmp, 0, 0, c.width, c.height);
@@ -492,19 +518,57 @@ document.addEventListener('visibilitychange', () => { if (document.visibilitySta
 $('ver').textContent = 'v' + APP_VERSION;
 if ('serviceWorker' in navigator && /^https?:$/.test(location.protocol)) navigator.serviceWorker.register('sw.js').catch(() => {});
 
-/* ---------- Wer bin ich? (Namens-Kürzel, keine echte Anmeldung/kein Passwort) ---------- */
-// Nur zur Zuordnung "wer hat das erfasst/gepickt" auf DIESEM Gerät. Jedes Handy hat seine eigene, getrennte
-// Liste/Pickliste (kein gemeinsamer Server) -- ein Name macht sichtbar, wer etwas gebucht hat, ersetzt aber
-// keine echten Benutzerkonten. Für eine geteilte Pickliste über mehrere Handys bräuchte es einen Server.
-function renderPicker() { $('pickerBtn').textContent = picker || 'Wer sind Sie?'; }
-$('pickerBtn').onclick = () => {
-  const v = prompt('Ihr Name oder Kürzel (für die Zuordnung, wer erfasst/gepickt hat):', picker);
-  if (v === null) return;
-  picker = v.trim().slice(0, 40);
-  try { localStorage.setItem(KEY_PICKER, picker); } catch {}
-  renderPicker();
-};
-renderPicker();
+/* ---------- Zugang: wer nutzt das Handy gerade? ---------- */
+// Bei JEDEM Öffnen der App muss ein Kürzel gewählt werden -- gedacht für ein geteiltes Lagerhandy, das
+// reihum genutzt wird, nicht für ein privates Gerät mit dauerhaftem Login. Die zwei Teamleiter-Kürzel
+// brauchen zusätzlich ein Passwort (Kürzel + "4567"); das schaltet die Pickliste-Verwaltung frei
+// (Excel/Foto laden, ersetzen, verwerfen). Picker ohne Passwort können weiter scannen/picken/exportieren.
+// Das läuft komplett im Browser -- kein Server, kein Schutz gegen jemanden, der den Quelltext liest oder
+// localStorage im Gerät ausliest. Für echte Zugriffskontrolle bräuchte es ein Backend.
+const PICKERS = ['AA', 'DR', 'SB']; // weitere Kürzel folgen
+const MASTERS = ['CMue', 'MD']; // Passwort je Kürzel: Kürzel + "4567"
+const LOCK_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>';
+
+function login(code, r) {
+  picker = code; role = r;
+  $('gate').hidden = true;
+  renderPicker(); applyRoleUI();
+}
+function loginMaster(code) {
+  for (let i = 0; i < 3; i++) {
+    const pw = prompt(`Passwort für ${code}:`);
+    if (pw === null) return; // abgebrochen, Gate bleibt offen
+    if (pw === code + '4567') { login(code, 'master'); return; }
+    toast('Falsches Passwort.');
+  }
+}
+function buildGate() {
+  const mk = (code, master) => {
+    const b = document.createElement('button');
+    b.className = 'btn' + (master ? ' gate-master' : ''); b.type = 'button';
+    if (master) b.innerHTML = LOCK_ICON;
+    b.append(code);
+    b.onclick = () => master ? loginMaster(code) : login(code, 'picker');
+    return b;
+  };
+  $('gatePickers').replaceChildren(...PICKERS.map(c => mk(c, false)));
+  $('gateMasters').replaceChildren(...MASTERS.map(c => mk(c, true)));
+}
+function renderPicker() {
+  $('pickerBtn').textContent = picker;
+  $('pickerBtn').classList.toggle('is-master', role === 'master');
+}
+$('pickerBtn').onclick = () => { $('gate').hidden = false; }; // Gerät an jemand anderen weitergeben
+// Master-only: Pickliste laden/ersetzen/verwerfen. Alles andere (scannen, picken, Export) bleibt für alle offen.
+function applyRoleUI() {
+  const isMaster = role === 'master';
+  for (const id of ['pickChoose', 'pickPhotoChoose', 'pickReplace', 'pickClear']) $(id).hidden = !isMaster;
+  $('pickHintMaster').hidden = !isMaster;
+  $('pickHintWorker').hidden = isMaster;
+  $('pickBar').hidden = mode !== 'pick' || !isMaster;
+}
+buildGate();
+if (window.__testLogin) login(window.__testLogin.code, window.__testLogin.role); // nur für die Testsuite, siehe fixtures.mjs
 
 $('modeSwitch').hidden = !PICK_ENABLED;
 render();
