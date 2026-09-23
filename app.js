@@ -1,7 +1,7 @@
 'use strict';
 /* LagerBuddy: Etikett fotografieren -> Barcodes + Text lokal auf dem Handy lesen -> Liste -> Excel.
    Alle Bibliotheken liegen in vendor/, kein Bild und keine Nummer verlässt das Gerät. */
-const APP_VERSION = '2026-09-23.9'; // bei JEDER Veröffentlichung erhöhen, genauso wie ?v= in index.html
+const APP_VERSION = '2026-09-23.10'; // bei JEDER Veröffentlichung erhöhen, genauso wie ?v= in index.html
 const LOCAL = new URL('vendor/', location.href).href;
 const KEY = 'lagerbuddy_v1';
 const KEY_PICK = 'lagerbuddy_pick_v1';
@@ -113,7 +113,7 @@ function setMode(m) {
   $('pickView').hidden = m !== 'pick';
   $('exportBar').hidden = m !== 'scan';
   $('pickBar').hidden = m !== 'pick' || role !== 'master';
-  if (m === 'pick') renderPick();
+  if (m === 'pick') renderPick(); else $('scan').hidden = false;
 }
 $('modeScan').onclick = () => setMode('scan');
 $('modePick').onclick = () => setMode('pick');
@@ -123,16 +123,20 @@ function renderPick() {
   const has = pick && pick.lines.length > 0;
   $('pickEmpty').hidden = !!has;
   $('pickBody').hidden = !has;
+  $('scan').hidden = !has; // ohne Liste gibt es nur "Pickliste fotografieren" -- sonst landet die ganze Seite im Etikett-Leser
   if (!has) return;
   const total = pick.lines.length;
   const done = pick.lines.filter(l => l.picked >= l.required).length;
   const complete = done === total;
+  const cur = currentPickLine();
   $('pickBanner').className = 'card pick-banner' + (complete ? ' done' : '');
   $('pickBanner').textContent = complete ? '✓ Pickliste vollständig – Aufgabe erledigt' : `${done} von ${total} Artikeln fertig`;
   $('pickName').textContent = pick.name;
   $('pickVon').value = pick.von || ''; $('pickNach').value = pick.nach || '';
-  $('pickList').replaceChildren(...pick.lines.map(l => {
-    const li = document.createElement('li'); li.className = 'card pick-line' + (l.picked >= l.required ? ' done' : '');
+  $('pickList').replaceChildren(...pick.lines.map((l, i) => {
+    const li = document.createElement('li');
+    li.className = 'card pick-line' + (l.picked >= l.required ? ' done' : l === cur ? ' current' : ' waiting');
+    if (l === cur) { const now = document.createElement('div'); now.className = 'pick-now'; now.textContent = `Jetzt buchen · Position ${i + 1} von ${total}`; li.append(now); }
     const head = document.createElement('div'); head.className = 'nums';
     head.textContent = l.artikel + (l.bez ? ' · ' + l.bez : '');
     const prog = document.createElement('div'); prog.className = 'sub';
@@ -159,13 +163,19 @@ function renderPick() {
     return li;
   }));
 }
+// Positionen werden strikt der Reihe nach gebucht: immer die erste, die noch nicht fertig ist
+function currentPickLine() { return pick?.lines.find(l => l.picked < l.required); }
 function addPick(e) {
-  const same = (pick?.lines || []).filter(l => normArt(l.artikel) === normArt(e.artikel));
-  if (!same.length) { toast('Dieser Artikel steht nicht auf der Pickliste.'); return; }
-  // gleicher Artikel kann mit mehreren Chargen auf der Liste stehen: passende Charge zuerst
-  let line = same.find(l => l.charge && normCharge(l.charge) === normCharge(e.charge)) || same.find(l => !l.charge);
-  if (!line) {
-    line = same.find(l => l.picked < l.required) || same[0];
+  const lines = pick?.lines || [];
+  const line = currentPickLine();
+  const sameArt = l => normArt(l.artikel) === normArt(e.artikel);
+  if (!lines.some(sameArt)) { toast('Dieser Artikel steht nicht auf der Pickliste.'); return; }
+  if (!line) { toast('Die Pickliste ist schon vollständig.'); return; }
+  const nochmal = `Bitte der Reihe nach: zuerst ${line.artikel}${line.charge ? ' · Charge ' + line.charge : ''} buchen.`;
+  if (!sameArt(line)) { toast(nochmal); return; }
+  if (line.charge && normCharge(line.charge) !== normCharge(e.charge)) {
+    // gleicher Artikel, aber die Charge einer späteren Position -> nicht vorziehen
+    if (lines.some(l => l !== line && sameArt(l) && l.charge && normCharge(l.charge) === normCharge(e.charge))) { toast(nochmal); return; }
     if (!confirm(`Falsche Charge? Erwartet ${line.charge}, erfasst ${e.charge || '–'}. Trotzdem buchen?`)) return;
   }
   if (line.einheit !== e.einheit) { toast(`Falsche Einheit: für diesen Artikel wird ${line.einheit} erwartet.`); return; }
