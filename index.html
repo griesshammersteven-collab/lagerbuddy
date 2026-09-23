@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'sha256-3s2/iGQuFIR1EPzkeVPyLTl/gJghqQ3RJpyKX08SB1s='; img-src 'self' blob:; connect-src 'self' blob: data:; worker-src 'self' blob:; manifest-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'sha256-BstH1sAfixSbKrMIly5XCUTzscAmksxv7giUWooqwEU='; img-src 'self' blob:; connect-src 'self' blob: data:; worker-src 'self' blob:; manifest-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'">
 <meta name="referrer" content="no-referrer">
 <meta name="theme-color" content="#0B4F82">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -41,6 +41,11 @@ h2{font-size:15px;color:var(--mute);font-weight:600;margin:24px 0 8px;text-trans
 .pick-line.done .nums{color:var(--ok)}
 .pick-line.current{border:2px solid var(--green);background:#22b84a14}
 .pick-line.waiting{opacity:.55}
+.pick-line.skipped{border-color:var(--warn)}
+.pick-skip{color:var(--warn);font-weight:600}
+.pick-skip-btn{width:auto;min-height:40px;margin-top:10px;font-size:14px}
+.pick-charge input{width:170px}
+#pickApprove{margin-top:8px}
 .pick-now{color:var(--green);font-size:13px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;margin-bottom:4px}
 .pick-note{color:var(--warn);font-weight:600}
 .pick-gebinde{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-top:6px}
@@ -173,6 +178,7 @@ h2{font-size:15px;color:var(--mute);font-weight:600;margin:24px 0 8px;text-trans
     </div>
     <div id="pickBody" hidden>
       <div class="card pick-banner" id="pickBanner"></div>
+      <button class="btn primary" type="button" id="pickApprove" hidden>Fehlende Positionen freigeben</button>
       <div class="pick-name" id="pickName"></div>
       <div class="pick-route">
         <input id="pickVon" placeholder="Von (Lagerplatz)" maxlength="40" autocapitalize="characters">
@@ -200,7 +206,7 @@ h2{font-size:15px;color:var(--mute);font-weight:600;margin:24px 0 8px;text-trans
 </div>
 <div id="toast" role="status" aria-live="polite"></div>
 
-<script src="parse.js?v=2026-09-23.11"></script>
-<script src="app.js?v=2026-09-23.11"></script>
+<script src="parse.js?v=2026-09-23.12"></script>
+<script src="app.js?v=2026-09-23.12"></script>
 </body>
 </html>

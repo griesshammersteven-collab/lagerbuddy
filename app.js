@@ -1,7 +1,7 @@
 'use strict';
 /* LagerBuddy: Etikett fotografieren -> Barcodes + Text lokal auf dem Handy lesen -> Liste -> Excel.
    Alle Bibliotheken liegen in vendor/, kein Bild und keine Nummer verlässt das Gerät. */
-const APP_VERSION = '2026-09-23.11'; // bei JEDER Veröffentlichung erhöhen, genauso wie ?v= in index.html
+const APP_VERSION = '2026-09-23.12'; // bei JEDER Veröffentlichung erhöhen, genauso wie ?v= in index.html
 const LOCAL = new URL('vendor/', location.href).href;
 const KEY = 'lagerbuddy_v1';
 const KEY_PICK = 'lagerbuddy_pick_v1';
@@ -127,16 +127,28 @@ function renderPick() {
   if (!has) return;
   const total = pick.lines.length;
   const done = pick.lines.filter(l => l.picked >= l.required).length;
-  const complete = done === total;
+  const missing = total - done;
+  const needsFreigabe = pickNeedsFreigabe();
+  const complete = missing === 0 || !!pick.freigabe;
   const cur = currentPickLine();
+  const fehlen = missing === 1 ? '1 Position fehlt' : `${missing} Positionen fehlen`;
   $('pickBanner').className = 'card pick-banner' + (complete ? ' done' : '');
-  $('pickBanner').textContent = complete ? '✓ Pickliste vollständig – Aufgabe erledigt' : `${done} von ${total} Artikeln fertig`;
+  $('pickBanner').textContent = missing === 0 ? '✓ Pickliste vollständig – Aufgabe erledigt'
+    : pick.freigabe ? `✓ Pickliste abgeschlossen – freigegeben von ${pick.freigabe.von}, ${fehlen}`
+    : needsFreigabe ? `Übersprungen: ${fehlen} – Freigabe durch Teamleiter (CMue oder MD) nötig`
+    : `${done} von ${total} Artikeln fertig`;
+  $('pickApprove').hidden = !(needsFreigabe && role === 'master');
   $('pickName').textContent = pick.name;
   $('pickVon').value = pick.von || ''; $('pickNach').value = pick.nach || '';
   $('pickList').replaceChildren(...pick.lines.map((l, i) => {
     const li = document.createElement('li');
-    li.className = 'card pick-line' + (l.picked >= l.required ? ' done' : l === cur ? ' current' : ' waiting');
-    if (l === cur) { const now = document.createElement('div'); now.className = 'pick-now'; now.textContent = `Jetzt buchen · Position ${i + 1} von ${total}`; li.append(now); }
+    const isDone = l.picked >= l.required;
+    li.className = 'card pick-line' + (isDone ? ' done' : l === cur ? ' current' : ' waiting') + (!isDone && l.skipped ? ' skipped' : '');
+    if (l === cur) {
+      const now = document.createElement('div'); now.className = 'pick-now';
+      now.textContent = l.skipped ? `Übersprungen · Position ${i + 1} – nachholen oder vom Teamleiter freigeben lassen` : `Jetzt buchen · Position ${i + 1} von ${total}`;
+      li.append(now);
+    }
     const head = document.createElement('div'); head.className = 'nums';
     head.textContent = l.artikel + (l.bez ? ' · ' + l.bez : '');
     const prog = document.createElement('div'); prog.className = 'sub';
@@ -145,6 +157,19 @@ function renderPick() {
       (geb ? ` · ≈ ${fmtN(geb)} Gebinde à ${fmtN(l.gebinde)} ${l.einheit}` : '');
     li.append(head, prog);
     if (l.hinweis) { const n = document.createElement('div'); n.className = 'sub pick-note'; n.textContent = l.hinweis; li.append(n); }
+    if (!isDone && l.skipped) { const s = document.createElement('div'); s.className = 'sub pick-skip'; s.textContent = `Übersprungen von ${l.skipped.von || '–'}`; li.append(s); }
+
+    // Charge korrigieren (v. a. nach dem Foto-Import) darf nur der Teamleiter
+    if (role === 'master') {
+      const chRow = document.createElement('div'); chRow.className = 'sub pick-gebinde pick-charge';
+      const chInput = document.createElement('input');
+      chInput.type = 'text'; chInput.autocapitalize = 'characters'; chInput.spellcheck = false; chInput.maxLength = 64;
+      chInput.value = l.charge || '';
+      chInput.setAttribute('aria-label', `Charge für Position ${i + 1} (${l.artikel})`);
+      chInput.onchange = () => setPickCharge(l, chInput.value);
+      chRow.append('Charge ', chInput);
+      li.append(chRow);
+    }
 
     // Gebindegröße steht selten schon auf der Liste -- hier einmal eintragen, dann rechnet die App mit
     const gebRow = document.createElement('div'); gebRow.className = 'sub pick-gebinde';
@@ -160,17 +185,55 @@ function renderPick() {
     };
     gebRow.append(gebInput, ' ' + l.einheit + ' pro Gebinde');
     li.append(gebRow);
+
+    if (l === cur && !l.skipped) {
+      const skip = document.createElement('button');
+      skip.type = 'button'; skip.className = 'btn pick-skip-btn'; skip.textContent = 'Position überspringen';
+      skip.onclick = () => skipPick(l, i);
+      li.append(skip);
+    }
     return li;
   }));
 }
-// Positionen werden strikt der Reihe nach gebucht: immer die erste, die noch nicht fertig ist
-function currentPickLine() { return pick?.lines.find(l => l.picked < l.required); }
+// Positionen werden strikt der Reihe nach gebucht: immer die erste offene, die nicht übersprungen wurde.
+// Sind nur noch übersprungene offen, dürfen die nachgeholt werden -- bis ein Teamleiter die Liste freigibt.
+function currentPickLine() {
+  if (!pick || pick.freigabe) return undefined;
+  const open = pick.lines.filter(l => l.picked < l.required);
+  return open.find(l => !l.skipped) || open[0];
+}
+function pickNeedsFreigabe() {
+  const open = (pick?.lines || []).filter(l => l.picked < l.required);
+  return !pick?.freigabe && open.length > 0 && open.every(l => l.skipped);
+}
+function skipPick(l, i) {
+  if (!confirm(`Position ${i + 1} (${l.artikel}${l.charge ? ' · Charge ' + l.charge : ''}) überspringen? Am Ende muss ein Teamleiter die fehlende Ware freigeben.`)) return;
+  l.skipped = { von: picker, ts: Date.now() };
+  if (!savePick()) { delete l.skipped; return; }
+  renderPick();
+}
+function setPickCharge(l, value) {
+  if (role !== 'master') { toast('Nur CMue oder MD können die Charge ändern.'); renderPick(); return; }
+  const before = l.charge;
+  l.charge = value.trim().replace(/\s+/g, ' ');
+  if (!savePick()) l.charge = before;
+  renderPick();
+}
+$('pickApprove').onclick = () => {
+  if (role !== 'master') { toast('Nur CMue oder MD können freigeben.'); return; }
+  const open = pick.lines.filter(l => l.picked < l.required);
+  if (!confirm(`Pickliste freigeben, obwohl ${open.length === 1 ? '1 Position fehlt' : open.length + ' Positionen fehlen'}?\n` +
+    open.map(l => `${l.artikel}${l.charge ? ' · Charge ' + l.charge : ''}: ${fmtN(l.picked)} / ${fmtN(l.required)} ${l.einheit}`).join('\n'))) return;
+  pick.freigabe = { von: picker, ts: Date.now() };
+  if (!savePick()) { delete pick.freigabe; return; }
+  renderPick();
+};
 function addPick(e) {
   const lines = pick?.lines || [];
   const line = currentPickLine();
   const sameArt = l => normArt(l.artikel) === normArt(e.artikel);
   if (!lines.some(sameArt)) { toast('Dieser Artikel steht nicht auf der Pickliste.'); return; }
-  if (!line) { toast('Die Pickliste ist schon vollständig.'); return; }
+  if (!line) { toast(pick.freigabe ? 'Die Pickliste ist schon freigegeben und abgeschlossen.' : 'Die Pickliste ist schon vollständig.'); return; }
   const nochmal = `Bitte der Reihe nach: zuerst ${line.artikel}${line.charge ? ' · Charge ' + line.charge : ''} buchen.`;
   if (!sameArt(line)) { toast(nochmal); return; }
   if (line.charge && normCharge(line.charge) !== normCharge(e.charge)) {
@@ -602,6 +665,7 @@ function applyRoleUI() {
   for (const id of ['pickChoose', 'pickReplace', 'pickClear']) $(id).hidden = !isMaster;
   $('pickHintMaster').hidden = !isMaster;
   $('pickBar').hidden = mode !== 'pick' || !isMaster;
+  if (mode === 'pick') renderPick(); // Charge-Felder/Freigabe-Knopf hängen an der Rolle
 }
 buildGate();
 if (window.__testLogin) login(window.__testLogin.code, window.__testLogin.role); // nur für die Testsuite, siehe fixtures.mjs
