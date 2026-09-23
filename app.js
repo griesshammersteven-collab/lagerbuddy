@@ -1,15 +1,14 @@
 'use strict';
 /* LagerBuddy: Etikett fotografieren -> Barcodes + Text lokal auf dem Handy lesen -> Liste -> Excel.
    Alle Bibliotheken liegen in vendor/, kein Bild und keine Nummer verlässt das Gerät. */
-const APP_VERSION = '2026-09-23.4'; // bei JEDER Veröffentlichung erhöhen, genauso wie ?v= in index.html
+const APP_VERSION = '2026-09-23.5'; // bei JEDER Veröffentlichung erhöhen, genauso wie ?v= in index.html
 const LOCAL = new URL('vendor/', location.href).href;
 const KEY = 'lagerbuddy_v1';
 const KEY_PICK = 'lagerbuddy_pick_v1';
+const KEY_PICKER = 'lagerbuddy_picker';
 const FIELDS = ['artikel', 'bez1', 'bez2', 'charge'];
 const fmtN = n => n.toLocaleString('de-DE');
-// Pickliste ist noch nicht freigegeben: nur beim lokalen Testen sichtbar, auf der Live-Seite ausgeblendet.
-// Zum Freischalten diese Zeile auf true setzen.
-const PICK_ENABLED = ['localhost', '127.0.0.1'].includes(location.hostname);
+const PICK_ENABLED = true;
 const CODE_OK = /^[0-9A-Z][0-9A-Z\-. $\/+%]{0,39}$/; // Code39-Zeichensatz, Länge gedeckelt gegen Unsinn auf einem manipulierten Etikett
 const $ = id => document.getElementById(id);
 
@@ -17,6 +16,7 @@ try { navigator.storage?.persist?.(); } catch {} // hilft gegen Löschen durch d
 
 let list = load();
 let pick = loadPick();
+let picker = (() => { try { return localStorage.getItem(KEY_PICKER) || ''; } catch { return ''; } })();
 let mode = 'scan'; // 'scan' (freie Liste) oder 'pick' (Pickliste)
 let busy = false;
 let editIdx = null; // Index des Listeneintrags, der gerade bearbeitet wird
@@ -90,7 +90,8 @@ function render() {
     };
     entry.append(nums);
     const mengeText = typeof e.menge === 'number' ? `${e.menge.toLocaleString('de-DE')} ${e.einheit}` : '';
-    for (const t of [e.bez1, e.bez2, mengeText, new Date(e.ts).toLocaleString('de-DE')]) {
+    const wannWer = new Date(e.ts).toLocaleString('de-DE') + (e.picker ? ' · ' + e.picker : '');
+    for (const t of [e.bez1, e.bez2, mengeText, e.lagerplatz ? 'Lagerplatz ' + e.lagerplatz : '', wannWer]) {
       if (!t) continue;
       const d = document.createElement('div'); d.className = 'sub'; d.textContent = t; entry.append(d);
     }
@@ -130,6 +131,7 @@ function renderPick() {
   $('pickBanner').className = 'card pick-banner' + (complete ? ' done' : '');
   $('pickBanner').textContent = complete ? '✓ Pickliste vollständig – Aufgabe erledigt' : `${done} von ${total} Artikeln fertig`;
   $('pickName').textContent = pick.name;
+  $('pickVon').value = pick.von || ''; $('pickNach').value = pick.nach || '';
   $('pickList').replaceChildren(...pick.lines.map(l => {
     const li = document.createElement('li'); li.className = 'card pick-line' + (l.picked >= l.required ? ' done' : '');
     const head = document.createElement('div'); head.className = 'nums';
@@ -153,7 +155,7 @@ function addPick(e) {
   if (line.einheit !== e.einheit) { toast(`Falsche Einheit: für diesen Artikel wird ${line.einheit} erwartet.`); return; }
   const before = line.picked;
   line.picked += e.menge;
-  line.scans.push({ ts: e.ts, menge: e.menge, charge: e.charge });
+  line.scans.push({ ts: e.ts, menge: e.menge, charge: e.charge, picker: e.picker });
   if (!savePick()) { line.picked = before; line.scans.pop(); return; }
   renderPick(); closeForm();
   toast(line.picked >= line.required
@@ -170,8 +172,8 @@ async function loadPicklistFile(file) {
     // roh (Zahlen) und formatiert (Text wie "8 kg", führende Nullen) nebeneinander, gleiche Zeilen
     const raw = XLSX.utils.sheet_to_json(ws, { header: 1, raw: true, defval: '', blankrows: true });
     const fmt = XLSX.utils.sheet_to_json(ws, { header: 1, raw: false, defval: '', blankrows: true });
-    const { title, lines, skipped } = parsePicklist(raw, fmt);
-    pick = { name: title ? `${title} · ${file.name}` : file.name, importedAt: Date.now(), lines };
+    const { title, von, nach, lines, skipped } = parsePicklist(raw, fmt);
+    pick = { name: title ? `${title} · ${file.name}` : file.name, von, nach, importedAt: Date.now(), lines };
     if (!savePick()) { pick = null; return; }
     renderPick();
     toast(`Pickliste geladen: ${lines.length} Artikel.` + (skipped ? ` ${skipped} Zeile(n) ohne Menge übersprungen.` : ''));
@@ -180,6 +182,14 @@ async function loadPicklistFile(file) {
     toast(err instanceof Error && err.message.length < 120 ? err.message : 'Excel-Datei konnte nicht gelesen werden.');
   }
 }
+// Lagerplatz: von Excel-Titel vorbelegt ("Pickliste B4 -> Bühl"), hier jederzeit nachtragbar/korrigierbar
+function savePickRoute() {
+  if (!pick) return;
+  pick.von = $('pickVon').value.trim(); pick.nach = $('pickNach').value.trim();
+  savePick();
+}
+$('pickVon').addEventListener('change', savePickRoute);
+$('pickNach').addEventListener('change', savePickRoute);
 $('pickChoose').onclick = () => $('pickFile').click();
 $('pickReplace').onclick = () => $('pickFile').click();
 $('pickFile').onchange = ev => { const f = ev.target.files[0]; ev.target.value = ''; loadPicklistFile(f); };
@@ -205,6 +215,7 @@ function showForm(r, file, idx = null) {
   renderLabelCheck();
   $('menge').value = typeof r.menge === 'number' ? String(r.menge).replace('.', ',') : '';
   for (const el of document.getElementsByName('einheit')) el.checked = el.value === r.einheit;
+  $('lagerplatz').value = r.lagerplatz || (mode === 'pick' && pick ? [pick.von, pick.nach].filter(Boolean).join(' → ') : '');
   if (previewUrl) URL.revokeObjectURL(previewUrl);
   previewUrl = file ? URL.createObjectURL(file) : null;
   $('preview').hidden = !file;
@@ -229,6 +240,8 @@ $('form').onsubmit = ev => {
   const einheit = document.querySelector('input[name=einheit]:checked')?.value;
   if (!einheit) { toast('Bitte Stück oder kg auswählen.'); return; }
   e.menge = menge; e.einheit = einheit;
+  e.lagerplatz = $('lagerplatz').value.trim();
+  if (picker) e.picker = picker;
   const lc = labelCheckState();
   if (lc.kind === 'bad' && !confirm(`Etikettfarbe passt nicht: Artikel ${e.artikel} braucht ein ${LABEL_ADJ[lc.need]} Etikett, erkannt wurde ${lc.got}. Trotzdem übernehmen?`)) return;
   if (lc.kind === 'ok' || lc.kind === 'bad') e.etikett = lc.got; // erkannte Farbe mitschreiben
@@ -239,7 +252,8 @@ $('form').onsubmit = ev => {
       !confirm('Artikel und Charge sind schon in der Liste. Trotzdem nochmal hinzufügen?')) return;
   if (idx !== null) {
     const old = list[idx];
-    list[idx] = { etikett: old.etikett, ...e, ts: old.ts, geaendert: e.ts }; // Erfassungszeit und erkannte Etikettfarbe bleiben
+    // Erfassungszeit, erkannte Etikettfarbe und ursprünglicher Erfasser bleiben; wer geändert hat, wird zusätzlich vermerkt
+    list[idx] = { etikett: old.etikett, ...e, ts: old.ts, picker: old.picker, geaendert: e.ts, geaendertVon: picker || undefined };
     if (!save()) { list[idx] = old; return; }
     render(); closeForm(); toast('Geändert.');
     return;
@@ -418,11 +432,11 @@ for (const id of ['cam', 'gal']) $(id).onchange = ev => { const f = ev.target.fi
 $('export').onclick = async () => {
   try {
     await loadScript('xlsx.mini.min.js');
-    const rows = [['Artikelnummer', 'Bezeichnung 1', 'Bezeichnung 2', 'Charge', 'Menge', 'Einheit', 'Erfasst am'],
-      ...list.map(e => [e.artikel, e.bez1, e.bez2, e.charge, e.menge ?? '', e.einheit ?? '', new Date(e.ts).toLocaleString('de-DE')])];
+    const rows = [['Artikelnummer', 'Bezeichnung 1', 'Bezeichnung 2', 'Charge', 'Menge', 'Einheit', 'Lagerplatz', 'Erfasst am', 'Erfasst von'],
+      ...list.map(e => [e.artikel, e.bez1, e.bez2, e.charge, e.menge ?? '', e.einheit ?? '', e.lagerplatz ?? '', new Date(e.ts).toLocaleString('de-DE'), e.picker ?? ''])];
     const ws = XLSX.utils.aoa_to_sheet(rows); // IDs/Text bleiben Text (führende Nullen, keine Formeln), Menge bleibt eine echte Zahl
     for (const k in ws) if (k[0] !== '!' && ws[k].t === 's') ws[k].z = '@';
-    ws['!cols'] = [{ wch: 16 }, { wch: 34 }, { wch: 34 }, { wch: 14 }, { wch: 10 }, { wch: 8 }, { wch: 20 }];
+    ws['!cols'] = [{ wch: 16 }, { wch: 34 }, { wch: 34 }, { wch: 14 }, { wch: 10 }, { wch: 8 }, { wch: 16 }, { wch: 20 }, { wch: 16 }];
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Erfassung');
     const d = new Date(), p = n => String(n).padStart(2, '0');
@@ -477,6 +491,20 @@ $('updBtn').onclick = applyUpdate;
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') setTimeout(checkUpdate, 1500); });
 $('ver').textContent = 'v' + APP_VERSION;
 if ('serviceWorker' in navigator && /^https?:$/.test(location.protocol)) navigator.serviceWorker.register('sw.js').catch(() => {});
+
+/* ---------- Wer bin ich? (Namens-Kürzel, keine echte Anmeldung/kein Passwort) ---------- */
+// Nur zur Zuordnung "wer hat das erfasst/gepickt" auf DIESEM Gerät. Jedes Handy hat seine eigene, getrennte
+// Liste/Pickliste (kein gemeinsamer Server) -- ein Name macht sichtbar, wer etwas gebucht hat, ersetzt aber
+// keine echten Benutzerkonten. Für eine geteilte Pickliste über mehrere Handys bräuchte es einen Server.
+function renderPicker() { $('pickerBtn').textContent = picker || 'Wer sind Sie?'; }
+$('pickerBtn').onclick = () => {
+  const v = prompt('Ihr Name oder Kürzel (für die Zuordnung, wer erfasst/gepickt hat):', picker);
+  if (v === null) return;
+  picker = v.trim().slice(0, 40);
+  try { localStorage.setItem(KEY_PICKER, picker); } catch {}
+  renderPicker();
+};
+renderPicker();
 
 $('modeSwitch').hidden = !PICK_ENABLED;
 render();

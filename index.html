@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'sha256-Wp7CONTfpiVwPQUECWNyJOA2hiz2wUgz2uval2bU26s='; img-src 'self' blob:; connect-src 'self' blob: data:; worker-src 'self' blob:; manifest-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'sha256-H3/jjWIX+WavXLDRPMdX/Iy57oI0/N3ld3LCGYTIrmQ='; img-src 'self' blob:; connect-src 'self' blob: data:; worker-src 'self' blob:; manifest-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'">
 <meta name="referrer" content="no-referrer">
 <meta name="theme-color" content="#0B4F82">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -61,7 +61,12 @@ h2{font-size:15px;color:var(--mute);font-weight:600;margin:24px 0 8px;text-trans
 .tag.ok{color:var(--ok);background:#5cb85c1f}.tag.check{color:var(--warn);background:#e6953a1f}
 #list{list-style:none;margin:0;padding:0;display:grid;gap:8px}
 #list li{display:grid;grid-template-columns:1fr auto auto;gap:4px;align-items:start}
+.hmeta{display:flex;align-items:center;gap:8px}
 .ver{color:#fff;opacity:.75;font-size:12px}
+.picker-btn{background:#ffffff26;border:1px solid #ffffff40;color:#fff;font:inherit;font-size:12px;font-weight:600;padding:4px 10px;border-radius:99px;cursor:pointer;max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pick-route{display:grid;grid-template-columns:1fr auto 1fr;gap:6px;align-items:center;margin:8px 0}
+.pick-route input{min-height:40px;padding:6px 10px;border-radius:8px;border:1px solid var(--line);background:#041019;color:var(--text);font:inherit;font-size:14px;width:100%}
+.pick-route span{color:var(--mute)}
 .update{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:12px;border-color:var(--green)}
 .update .btn{width:auto}
 .entry{all:unset;display:grid;gap:4px;min-width:0;cursor:pointer;border-radius:8px}
@@ -79,7 +84,7 @@ h2{font-size:15px;color:var(--mute);font-weight:600;margin:24px 0 8px;text-trans
 </style>
 </head>
 <body>
-<header><h1>Lager<span>Buddy</span></h1><span class="ver" id="ver"></span></header>
+<header><h1>Lager<span>Buddy</span></h1><div class="hmeta"><button class="picker-btn" type="button" id="pickerBtn"></button><span class="ver" id="ver"></span></div></header>
 
 <main>
   <div class="card update" id="update" role="status" hidden>
@@ -112,6 +117,7 @@ h2{font-size:15px;color:var(--mute);font-weight:600;margin:24px 0 8px;text-trans
     <div class="f"><label for="bez1">Bezeichnung 1 <span class="tag" id="t-bez1"></span></label><input id="bez1" name="bez1" maxlength="200"></div>
     <div class="f"><label for="bez2">Bezeichnung 2 <span class="tag" id="t-bez2"></span></label><input id="bez2" name="bez2" maxlength="200"></div>
     <div class="f"><label for="charge">Charge <span class="tag" id="t-charge"></span></label><input id="charge" name="charge" autocapitalize="off" spellcheck="false" maxlength="64"></div>
+    <div class="f"><label for="lagerplatz">Lagerplatz <span class="sub">optional</span></label><input id="lagerplatz" name="lagerplatz" autocapitalize="characters" maxlength="40" placeholder="z. B. B4 oder Bühl"></div>
     <div class="f"><label for="menge">Menge pro Gebinde</label><input id="menge" name="menge" type="text" inputmode="decimal" placeholder="z. B. 24 oder 12,5"></div>
     <div class="row unit">
       <label class="btn"><input class="file" type="radio" name="einheit" value="Stück"> Stück</label>
@@ -136,6 +142,11 @@ h2{font-size:15px;color:var(--mute);font-weight:600;margin:24px 0 8px;text-trans
     <div id="pickBody" hidden>
       <div class="card pick-banner" id="pickBanner"></div>
       <div class="pick-name" id="pickName"></div>
+      <div class="pick-route">
+        <input id="pickVon" placeholder="Von (Lagerplatz)" maxlength="40" autocapitalize="characters">
+        <span>→</span>
+        <input id="pickNach" placeholder="Nach (Lagerplatz)" maxlength="40" autocapitalize="characters">
+      </div>
       <ul id="pickList"></ul>
     </div>
   </div>
@@ -156,7 +167,7 @@ h2{font-size:15px;color:var(--mute);font-weight:600;margin:24px 0 8px;text-trans
 </div>
 <div id="toast" role="status" aria-live="polite"></div>
 
-<script src="parse.js?v=2026-09-23.4"></script>
-<script src="app.js?v=2026-09-23.4"></script>
+<script src="parse.js?v=2026-09-23.5"></script>
+<script src="app.js?v=2026-09-23.5"></script>
 </body>
 </html>

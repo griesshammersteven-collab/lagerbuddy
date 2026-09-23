@@ -19,33 +19,56 @@ function cleanLine(words) {
 // Aufbau des Etiketts: Artikelnummer (Barcode oben), Bezeichnung 1, Bezeichnung 2, Charge (Barcode unten), Fußzeilen.
 function parseLabel(lines, codes) {
   const r = { artikel: '', bez1: '', bez2: '', charge: '', artikelCode: false, chargeCode: false };
-  // OCR-tolerant: "MH0", "L5-Nr", "WE Menge" etc. werden auch bei Lesefehlern erkannt
+  // OCR-tolerant: "MH0", "L5-Nr", "WE Menge" etc. werden auch bei Lesefehlern erkannt -- Ende UNSERES Etiketts, danach abbrechen
   const footer = /M\s*H\s*[DO0]|L\s*[S5]\W*N\s*r|Lager\s*[:.]?|W\s*E[\s-]*Menge|Bestell/i;
+  // Fremdes Lieferanten-Etikett (oft zusätzlich auf dem Gebinde) auf Englisch: nur diese eine Zeile
+  // überspringen, nicht abbrechen -- unser eigenes Etikett kann im Foto trotzdem noch folgen.
+  const foreign = /BATCH|NET\s*WEIGH|GROSS\s*WEIGH|MFG\s*DA|EXP\s*DA|MADE\s+IN|COUNTRY\s+OF|STORAGE/i;
   const codeSet = new Set(codes);
   const bez = [];
   for (const { text, conf } of lines) {
     if (footer.test(text)) break;
+    if (foreign.test(text)) continue;
     const merged = text.replace(/(\d)\s+(?=\d)/g, '$1'); // OCR trennt lange Nummern manchmal mit Leerzeichen: "931000 099000"
     const num = (merged.match(/\d{4,}/) || [])[0];
     if (num && codeSet.has(num)) { if (bez.length) break; continue; } // die Barcode-Zahl selbst ist nie eine Bezeichnung
     const isText = conf >= 60 && /\p{L}{3,}/u.test(text);
-    if (!bez.length && !r.artikel && num && num.length >= 8 && !isText) r.artikel = num;
-    else if (isText && bez.length < 2) bez.push(text);
-    else if (bez.length && num && !r.charge) { r.charge = num; break; }
+    if (!bez.length && !r.artikel && num && num.length >= 8 && !isText) { r.artikel = num; continue; }
+    if (isText && bez.length < 2) { bez.push(text); continue; }
+    if (bez.length && !r.charge) {
+      // Rohstoff-Chargen sind oft nicht rein numerisch ("PNS 5 SF-26-201", "KSM-ORG-25-SII-S1432").
+      // Stehen die gefundenen Ziffern als eigenes, durch Leerzeichen/Satzzeichen abgetrenntes Wort da
+      // (z. B. Vordruck-Reste wie "Ey NEE 500912"), sind sie die Charge. Kleben sie an Buchstaben
+      // (wie "S1432" in "...SII-S1432"), ist das kein eigenständiges Wort, sondern Teil eines
+      // zusammenhängenden Codes -- dann zählt die ganze Zeile, wenn sie wie eine Charge aussieht.
+      const i = num ? merged.indexOf(num) : -1;
+      const edge = j => j < 0 || j >= merged.length || /[^\p{L}\d]/u.test(merged[j]);
+      if (num && i >= 0 && edge(i - 1) && edge(i + num.length)) { r.charge = num; break; }
+      if (conf >= 45 && /\d/.test(text) && /^[\p{L}\p{N}][\p{L}\p{N}\-. \/]{2,39}$/u.test(text)) { r.charge = text; break; }
+      if (num) { r.charge = num; break; } // Ziffern glued, aber Zeile passt nicht ins Muster: besser als nichts
+    }
   }
   [r.bez1 = '', r.bez2 = ''] = bez;
 
-  // Barcodes sind zuverlässiger als Texterkennung und gewinnen immer. Der Inhalt entscheidet,
-  // nicht die Position im Bild: die Artikelnummer hat auf diesem Etikett mehr Ziffern als die
-  // Charge, das funktioniert daher auch bei doppelt gelesenen, vertauschten oder fehlenden Codes.
-  // ponytail: wenn drei Codes gefunden werden, gewinnt einfach der erste, der zur jeweiligen
-  // Ziffernlänge passt -- bei einem dritten echten Code39-Etikett im Bild kann das danebenliegen.
-  // Hauptschutz ist ohnehin die Formatbeschränkung auf Code39 in app.js (blendet fremde
-  // Karton-Barcodes wie EAN meist schon vorher aus). Upgrade bei Bedarf: Codes anhand ihrer
-  // Position im Bild filtern, nicht nur anhand des Inhalts.
+  // Barcodes sind zuverlässiger als Texterkennung und gewinnen immer.
+  // Bei zwei Codes, von denen genau einer eindeutig kürzer ist (Fertigware: Charge < 8 Zeichen,
+  // Artikelnummer länger), entscheidet der Inhalt -- das bleibt unabhängig von Drehung/Reihenfolge
+  // richtig. Sind beide gleich lang oder beide lang (Rohstoffe: Charge oft genauso lang wie die
+  // Artikelnummer oder länger, z. B. "KSM-ORG-25-SII-S1432"), entscheidet die gedruckte Reihenfolge:
+  // Artikelnummer steht auf diesem Etikett immer oben, Charge immer unten -- codes kommt bereits so
+  // sortiert an (siehe readCodes in app.js).
+  // ponytail: bei einem Foto ohne EXIF-Ausrichtung, das zugleich in den zweiten Fall fällt, kann
+  // "oben/unten" vertauscht sein. Der weit überwiegende Normalfall (Foto mit EXIF) bleibt richtig.
   const uniq = [...new Set(codes)];
-  const art = uniq.find(c => c.length >= 8);
-  const charge = uniq.find(c => c !== art && c.length < 8);
+  let art, charge;
+  if (uniq.length >= 2) {
+    const short = uniq.filter(c => c.length < 8);
+    if (short.length === 1) { charge = short[0]; art = uniq.find(c => c !== charge); }
+    else { art = uniq[0]; charge = uniq[uniq.length - 1]; }
+  } else {
+    art = uniq.find(c => c.length >= 8);
+    charge = uniq.find(c => c !== art && c.length < 8);
+  }
   if (art) { r.artikel = art; r.artikelCode = true; }
   if (charge) { r.charge = charge; r.chargeCode = true; }
   return r;
@@ -162,7 +185,10 @@ function parsePicklist(raw, fmt = raw) {
   const valid = lines.filter(l => l.required > 0);
   if (!valid.length) throw pickErr('Keine gültige Zeile mit Artikelnummer und Menge gefunden.');
   const title = h > 0 ? raw.slice(0, h).flat().map(c => String(c).trim()).find(Boolean) || '' : '';
-  return { title, lines: valid, skipped: lines.length - valid.length };
+  // Titel wie "Pickliste B4 -> Bühl": das ist der Lagerplatz-Umzug für die ganze Liste (Von -> Nach).
+  const route = title.replace(/^pickliste\s*/i, '').match(/(.+?)\s*(?:->|-+>|→)\s*(.+)/);
+  const von = route ? route[1].trim() : '', nach = route ? route[2].trim() : '';
+  return { title, von, nach, lines: valid, skipped: lines.length - valid.length };
 }
 
 // Pickliste-Modus: Barcodes gegen die Liste abgleichen statt nur die Ziffernlänge zu raten.
