@@ -1,7 +1,7 @@
 'use strict';
 /* LagerBuddy: Etikett fotografieren -> Barcodes + Text lokal auf dem Handy lesen -> Liste -> Excel.
    Alle Bibliotheken liegen in vendor/, kein Bild und keine Nummer verlässt das Gerät. */
-const APP_VERSION = '2026-09-23.6'; // bei JEDER Veröffentlichung erhöhen, genauso wie ?v= in index.html
+const APP_VERSION = '2026-09-23.7'; // bei JEDER Veröffentlichung erhöhen, genauso wie ?v= in index.html
 const LOCAL = new URL('vendor/', location.href).href;
 const KEY = 'lagerbuddy_v1';
 const KEY_PICK = 'lagerbuddy_pick_v1';
@@ -169,6 +169,7 @@ function applyParsedPicklist({ title, von, nach, lines, skipped }, sourceName, h
 }
 async function loadPicklistFile(file) {
   if (!file) return;
+  if (role !== 'master') { toast('Nur CMue oder MD können eine Pickliste laden.'); return; } // Knöpfe sind zwar schon versteckt, hier zusätzlich abgesichert
   try {
     await loadScript('xlsx.mini.min.js');
     const buf = await file.arrayBuffer();
@@ -188,6 +189,7 @@ async function loadPicklistFile(file) {
 // Weniger zuverlässig als die Excel-Datei -- am Ende steht deshalb ein deutlicher Prüfhinweis.
 async function loadPicklistPhoto(file) {
   if (!file || busy) return;
+  if (role !== 'master') { toast('Nur CMue oder MD können eine Pickliste laden.'); return; }
   if (file.size > 30 * 1024 * 1024) { toast('Foto ist zu groß (über 30 MB). Bitte erneut aufnehmen.'); return; }
   setBusy(true, 'Pickliste wird gelesen …');
   let canvas;
@@ -220,6 +222,7 @@ $('pickFile').onchange = ev => { const f = ev.target.files[0]; ev.target.value =
 $('pickPhotoChoose').onclick = () => $('pickCam').click();
 $('pickCam').onchange = ev => { const f = ev.target.files[0]; ev.target.value = ''; loadPicklistPhoto(f); };
 $('pickClear').onclick = () => {
+  if (role !== 'master') { toast('Nur CMue oder MD können die Pickliste verwerfen.'); return; }
   if (!confirm('Pickliste verwerfen? Der Fortschritt geht verloren.')) return;
   pick = null;
   try { localStorage.removeItem(KEY_PICK); } catch {}
