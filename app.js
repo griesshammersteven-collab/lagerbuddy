@@ -1,7 +1,7 @@
 'use strict';
 /* LagerBuddy: Etikett fotografieren -> Barcodes + Text lokal auf dem Handy lesen -> Liste -> Excel.
    Alle Bibliotheken liegen in vendor/, kein Bild und keine Nummer verlässt das Gerät. */
-const APP_VERSION = '2026-09-23.7'; // bei JEDER Veröffentlichung erhöhen, genauso wie ?v= in index.html
+const APP_VERSION = '2026-09-23.8'; // bei JEDER Veröffentlichung erhöhen, genauso wie ?v= in index.html
 const LOCAL = new URL('vendor/', location.href).href;
 const KEY = 'lagerbuddy_v1';
 const KEY_PICK = 'lagerbuddy_pick_v1';
@@ -136,9 +136,26 @@ function renderPick() {
     const head = document.createElement('div'); head.className = 'nums';
     head.textContent = l.artikel + (l.bez ? ' · ' + l.bez : '');
     const prog = document.createElement('div'); prog.className = 'sub';
-    prog.textContent = (l.charge ? `Charge ${l.charge} · ` : '') + `${fmtN(l.picked)} / ${fmtN(l.required)} ${l.einheit}`;
+    const geb = gebindeCount(l.required, l.gebinde);
+    prog.textContent = (l.charge ? `Charge ${l.charge} · ` : '') + `${fmtN(l.picked)} / ${fmtN(l.required)} ${l.einheit}` +
+      (geb ? ` · ≈ ${fmtN(geb)} Gebinde à ${fmtN(l.gebinde)} ${l.einheit}` : '');
     li.append(head, prog);
     if (l.hinweis) { const n = document.createElement('div'); n.className = 'sub pick-note'; n.textContent = l.hinweis; li.append(n); }
+
+    // Gebindegröße steht selten schon auf der Liste -- hier einmal eintragen, dann rechnet die App mit
+    const gebRow = document.createElement('div'); gebRow.className = 'sub pick-gebinde';
+    gebRow.append('Gebindegröße ');
+    const gebInput = document.createElement('input');
+    gebInput.type = 'text'; gebInput.inputMode = 'decimal'; gebInput.placeholder = 'z. B. 25';
+    gebInput.value = l.gebinde ? String(l.gebinde).replace('.', ',') : '';
+    gebInput.setAttribute('aria-label', `Gebindegröße für ${l.artikel}`);
+    gebInput.onchange = () => {
+      const v = parseFloat(gebInput.value.trim().replace(',', '.'));
+      l.gebinde = v > 0 ? v : undefined;
+      savePick(); renderPick();
+    };
+    gebRow.append(gebInput, ' ' + l.einheit + ' pro Gebinde');
+    li.append(gebRow);
     return li;
   }));
 }
@@ -188,8 +205,9 @@ async function loadPicklistFile(file) {
 // verrät die Tabellenspalte (picklistGridFromWords), danach läuft dieselbe Auswertung wie beim Excel-Import.
 // Weniger zuverlässig als die Excel-Datei -- am Ende steht deshalb ein deutlicher Prüfhinweis.
 async function loadPicklistPhoto(file) {
+  // Für alle offen (nicht nur Teamleiter): die gedruckte Liste landet oft direkt beim Picker, ohne
+  // vorher digital beim Teamleiter vorbeizukommen. Nur die Excel-Datei bleibt Teamleiter-only.
   if (!file || busy) return;
-  if (role !== 'master') { toast('Nur CMue oder MD können eine Pickliste laden.'); return; }
   if (file.size > 30 * 1024 * 1024) { toast('Foto ist zu groß (über 30 MB). Bitte erneut aufnehmen.'); return; }
   setBusy(true, 'Pickliste wird gelesen …');
   let canvas;
@@ -220,6 +238,7 @@ $('pickChoose').onclick = () => $('pickFile').click();
 $('pickReplace').onclick = () => $('pickFile').click();
 $('pickFile').onchange = ev => { const f = ev.target.files[0]; ev.target.value = ''; loadPicklistFile(f); };
 $('pickPhotoChoose').onclick = () => $('pickCam').click();
+$('pickPhotoReplace').onclick = () => $('pickCam').click();
 $('pickCam').onchange = ev => { const f = ev.target.files[0]; ev.target.value = ''; loadPicklistPhoto(f); };
 $('pickClear').onclick = () => {
   if (role !== 'master') { toast('Nur CMue oder MD können die Pickliste verwerfen.'); return; }
@@ -562,12 +581,12 @@ function renderPicker() {
   $('pickerBtn').classList.toggle('is-master', role === 'master');
 }
 $('pickerBtn').onclick = () => { $('gate').hidden = false; }; // Gerät an jemand anderen weitergeben
-// Master-only: Pickliste laden/ersetzen/verwerfen. Alles andere (scannen, picken, Export) bleibt für alle offen.
+// Master-only: Pickliste per EXCEL laden/ersetzen, und verwerfen. Per FOTO laden/ersetzen ist für alle offen
+// (die gedruckte Liste landet oft direkt beim Picker). Scannen/Picken/Export bleiben ohnehin für alle offen.
 function applyRoleUI() {
   const isMaster = role === 'master';
-  for (const id of ['pickChoose', 'pickPhotoChoose', 'pickReplace', 'pickClear']) $(id).hidden = !isMaster;
+  for (const id of ['pickChoose', 'pickReplace', 'pickClear']) $(id).hidden = !isMaster;
   $('pickHintMaster').hidden = !isMaster;
-  $('pickHintWorker').hidden = isMaster;
   $('pickBar').hidden = mode !== 'pick' || !isMaster;
 }
 buildGate();

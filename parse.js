@@ -146,6 +146,7 @@ function parsePicklist(raw, fmt = raw) {
   };
   const colCharge = col(['charge', 'lot']), colMenge = col(['menge']), colEinheit = col(['einheit']);
   const colAnzahl = col(['anzahl']), colGewicht = col(['gewicht']), colBez = col(['bezeichnung']);
+  const colGebinde = col(['gebinde']); // z. B. "Gebindegröße": kg/Stück pro Gebinde, falls in der Vorlage vorhanden
   if (colMenge < 0 && colAnzahl < 0 && colGewicht < 0) throw pickErr('Spalte "Menge", "Anzahl" oder "Gewicht" nicht gefunden.');
 
   const text = (i, j) => {
@@ -181,6 +182,10 @@ function parsePicklist(raw, fmt = raw) {
       if (note && !isHeader(note)) cur.hinweis = note;
       if (!cur.required) Object.assign(cur, qty(i) || {});
     }
+    if (cur && !cur.gebinde) {
+      const g = parseFloat(text(i, colGebinde).replace(',', '.'));
+      if (g > 0) cur.gebinde = g;
+    }
   }
   const valid = lines.filter(l => l.required > 0);
   if (!valid.length) throw pickErr('Keine gültige Zeile mit Artikelnummer und Menge gefunden.');
@@ -189,6 +194,12 @@ function parsePicklist(raw, fmt = raw) {
   const route = title.replace(/^pickliste\s*/i, '').match(/(.+?)\s*(?:->|-+>|→)\s*(.+)/);
   const von = route ? route[1].trim() : '', nach = route ? route[2].trim() : '';
   return { title, von, nach, lines: valid, skipped: lines.length - valid.length };
+}
+
+// Wie viele Gebinde braucht es für eine Position? 200 kg bei 25 kg/Gebinde -> 8. Aufgerundet: ein
+// angebrochenes Gebinde zählt als eins, man kann ja kein Teil-Gebinde greifen.
+function gebindeCount(required, gebinde) {
+  return gebinde > 0 ? Math.ceil(required / gebinde) : null;
 }
 
 // Fotografierte Pickliste (Papier statt Excel) in dasselbe Zeilen/Spalten-Raster verwandeln, das
@@ -260,4 +271,4 @@ function applyPicklist(r, codes, lines) {
   return out;
 }
 
-if (typeof module !== 'undefined') module.exports = { cleanLine, parseLabel, parsePicklist, applyPicklist, picklistGridFromWords, normArt, normCharge, requiredLabelColor, classifyLabelColor };
+if (typeof module !== 'undefined') module.exports = { cleanLine, parseLabel, parsePicklist, applyPicklist, picklistGridFromWords, gebindeCount, normArt, normCharge, requiredLabelColor, classifyLabelColor };

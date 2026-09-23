@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'sha256-427kcLiUjd3n9eV1BwaoGF6T6hXO7rNJ4dMn8D3LadM='; img-src 'self' blob:; connect-src 'self' blob: data:; worker-src 'self' blob:; manifest-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'sha256-pIg8rzzEoS2Jz7gZ5BDiIVTc//+3uoFJN10xtgoCohg='; img-src 'self' blob:; connect-src 'self' blob: data:; worker-src 'self' blob:; manifest-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'">
 <meta name="referrer" content="no-referrer">
 <meta name="theme-color" content="#0B4F82">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -34,11 +34,14 @@ h2{font-size:15px;color:var(--mute);font-weight:600;margin:24px 0 8px;text-trans
 .pick-banner.done{color:var(--ok);background:#5cb85c1f;border-color:var(--ok)}
 .pick-name{color:var(--mute);font-size:13px;margin:10px 0 8px}
 .pick-hint{color:var(--mute);font-size:13px;margin-top:10px}
-#pickPhotoChoose{margin-top:10px}
+#pickChoose{margin-top:10px}
+#pickPhotoReplace{width:auto;margin:10px 0}
 #pickList{list-style:none;margin:0;padding:0;display:grid;gap:8px}
 .pick-line.done{border-color:var(--ok)}
 .pick-line.done .nums{color:var(--ok)}
 .pick-note{color:var(--warn);font-weight:600}
+.pick-gebinde{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-top:6px}
+.pick-gebinde input{width:64px;min-height:34px;padding:4px 8px;border-radius:8px;border:1px solid var(--line);background:#041019;color:var(--text);font:inherit;font-size:14px}
 .btn svg{width:22px;height:22px;flex:none}
 .primary{background:var(--green);border-color:var(--green);color:#04170b}
 .big{min-height:72px;font-size:19px}
@@ -156,10 +159,10 @@ h2{font-size:15px;color:var(--mute);font-weight:600;margin:24px 0 8px;text-trans
   <input class="file" type="file" accept="image/*" capture="environment" id="pickCam">
   <div id="pickView" hidden>
     <div class="card" id="pickEmpty">
-      <button class="btn primary" type="button" id="pickChoose" hidden>Pickliste-Excel auswählen</button>
-      <button class="btn" type="button" id="pickPhotoChoose" hidden>Pickliste fotografieren</button>
-      <p class="pick-hint" id="pickHintMaster">Die gewohnte Pickliste-Excel (Artikelnummer/Bezeichnung, Charge/Lot, Menge best.) direkt auswählen. Auch einfache Tabellen mit „Artikelnummer" und „Menge"/„Anzahl"/„Gewicht" gehen. Kein Excel zur Hand? Die gedruckte Liste fotografieren geht auch, ist aber weniger zuverlässig – Zeilen danach prüfen.</p>
-      <p class="pick-hint" id="pickHintWorker" hidden>Noch keine Pickliste geladen. Bitte einen Teamleiter (CMue oder MD) bitten, sie zu laden.</p>
+      <button class="btn primary" type="button" id="pickPhotoChoose">Pickliste fotografieren</button>
+      <button class="btn" type="button" id="pickChoose" hidden>Pickliste-Excel auswählen</button>
+      <p class="pick-hint">Die gedruckte Pickliste fotografieren – Artikelnummer, Bezeichnung, Charge und Menge werden per Texterkennung eingelesen. Bitte danach prüfen, das ist nicht so zuverlässig wie eine Excel-Datei.</p>
+      <p class="pick-hint" id="pickHintMaster" hidden>Als Teamleiter geht auch die gewohnte Excel-Datei (Artikelnummer/Bezeichnung, Charge/Lot, Menge best., oder einfache Tabellen mit „Artikelnummer" und „Menge"/„Anzahl"/„Gewicht").</p>
     </div>
     <div id="pickBody" hidden>
       <div class="card pick-banner" id="pickBanner"></div>
@@ -169,6 +172,7 @@ h2{font-size:15px;color:var(--mute);font-weight:600;margin:24px 0 8px;text-trans
         <span>→</span>
         <input id="pickNach" placeholder="Nach (Lagerplatz)" maxlength="40" autocapitalize="characters">
       </div>
+      <button class="btn" type="button" id="pickPhotoReplace">Pickliste per Foto ersetzen</button>
       <ul id="pickList"></ul>
     </div>
   </div>
@@ -189,7 +193,7 @@ h2{font-size:15px;color:var(--mute);font-weight:600;margin:24px 0 8px;text-trans
 </div>
 <div id="toast" role="status" aria-live="polite"></div>
 
-<script src="parse.js?v=2026-09-23.7"></script>
-<script src="app.js?v=2026-09-23.7"></script>
+<script src="parse.js?v=2026-09-23.8"></script>
+<script src="app.js?v=2026-09-23.8"></script>
 </body>
 </html>
