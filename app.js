@@ -1,6 +1,7 @@
 'use strict';
 /* LagerBuddy: Etikett fotografieren -> Barcodes + Text lokal auf dem Handy lesen -> Liste -> Excel.
    Alle Bibliotheken liegen in vendor/, kein Bild und keine Nummer verlässt das Gerät. */
+const APP_VERSION = '2026-09-23.2'; // bei JEDER Veröffentlichung erhöhen, genauso wie ?v= in index.html
 const LOCAL = new URL('vendor/', location.href).href;
 const KEY = 'lagerbuddy_v1';
 const KEY_PICK = 'lagerbuddy_pick_v1';
@@ -68,8 +69,12 @@ function render() {
     const li = document.createElement('li'); li.className = 'card';
     const entry = document.createElement('button');
     entry.className = 'entry'; entry.type = 'button';
-    entry.setAttribute('aria-label', `Eintrag bearbeiten: ${e.artikel || '–'} / ${e.charge || '–'}`);
     entry.onclick = () => showForm(e, null, i);
+    const edit = document.createElement('button');
+    edit.className = 'del edit'; edit.type = 'button';
+    edit.setAttribute('aria-label', `Eintrag bearbeiten: ${e.artikel || '–'} / ${e.charge || '–'}`);
+    edit.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>';
+    edit.onclick = entry.onclick;
     const nums = document.createElement('div'); nums.className = 'nums';
     nums.append(e.artikel || '–', ' · Charge ');
     const b = document.createElement('b'); b.textContent = e.charge || '–'; nums.append(b);
@@ -89,7 +94,7 @@ function render() {
       if (!t) continue;
       const d = document.createElement('div'); d.className = 'sub'; d.textContent = t; entry.append(d);
     }
-    li.append(entry, del);
+    li.append(entry, edit, del);
     return li;
   }).reverse());
   $('count').textContent = list.length ? `(${list.length})` : '';
@@ -130,14 +135,21 @@ function renderPick() {
     const head = document.createElement('div'); head.className = 'nums';
     head.textContent = l.artikel + (l.bez ? ' · ' + l.bez : '');
     const prog = document.createElement('div'); prog.className = 'sub';
-    prog.textContent = `${fmtN(l.picked)} / ${fmtN(l.required)} ${l.einheit}`;
+    prog.textContent = (l.charge ? `Charge ${l.charge} · ` : '') + `${fmtN(l.picked)} / ${fmtN(l.required)} ${l.einheit}`;
     li.append(head, prog);
+    if (l.hinweis) { const n = document.createElement('div'); n.className = 'sub pick-note'; n.textContent = l.hinweis; li.append(n); }
     return li;
   }));
 }
 function addPick(e) {
-  const line = pick?.lines.find(l => l.artikel === e.artikel);
-  if (!line) { toast('Dieser Artikel steht nicht auf der Pickliste.'); return; }
+  const same = (pick?.lines || []).filter(l => normArt(l.artikel) === normArt(e.artikel));
+  if (!same.length) { toast('Dieser Artikel steht nicht auf der Pickliste.'); return; }
+  // gleicher Artikel kann mit mehreren Chargen auf der Liste stehen: passende Charge zuerst
+  let line = same.find(l => l.charge && normCharge(l.charge) === normCharge(e.charge)) || same.find(l => !l.charge);
+  if (!line) {
+    line = same.find(l => l.picked < l.required) || same[0];
+    if (!confirm(`Falsche Charge? Erwartet ${line.charge}, erfasst ${e.charge || '–'}. Trotzdem buchen?`)) return;
+  }
   if (line.einheit !== e.einheit) { toast(`Falsche Einheit: für diesen Artikel wird ${line.einheit} erwartet.`); return; }
   const before = line.picked;
   line.picked += e.menge;
@@ -154,14 +166,17 @@ async function loadPicklistFile(file) {
     await loadScript('xlsx.mini.min.js');
     const buf = await file.arrayBuffer();
     const wb = XLSX.read(buf, { type: 'array' });
-    const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { defval: '' });
-    const lines = parsePicklist(rows);
-    pick = { name: file.name, importedAt: Date.now(), lines };
+    const ws = wb.Sheets[wb.SheetNames[0]];
+    // roh (Zahlen) und formatiert (Text wie "8 kg", führende Nullen) nebeneinander, gleiche Zeilen
+    const raw = XLSX.utils.sheet_to_json(ws, { header: 1, raw: true, defval: '', blankrows: true });
+    const fmt = XLSX.utils.sheet_to_json(ws, { header: 1, raw: false, defval: '', blankrows: true });
+    const { title, lines, skipped } = parsePicklist(raw, fmt);
+    pick = { name: title ? `${title} · ${file.name}` : file.name, importedAt: Date.now(), lines };
     if (!savePick()) { pick = null; return; }
     renderPick();
-    toast(`Pickliste geladen: ${lines.length} Artikel.`);
+    toast(`Pickliste geladen: ${lines.length} Artikel.` + (skipped ? ` ${skipped} Zeile(n) ohne Menge übersprungen.` : ''));
   } catch (err) {
-    console.error(err);
+    if (!err?.userMessage) console.error(err);
     toast(err instanceof Error && err.message.length < 120 ? err.message : 'Excel-Datei konnte nicht gelesen werden.');
   }
 }
@@ -329,7 +344,8 @@ async function scan(file) {
     try { codes = await readCodes(canvas); } catch (err) { console.warn(err); }
     let lines = [];
     try { setBusy(true, 'Text wird gelesen …'); lines = await ocrLines(canvas, codes); } catch (err) { console.warn(err); }
-    const r = parseLabel(lines, codes.map(c => c.text));
+    let r = parseLabel(lines, codes.map(c => c.text));
+    if (mode === 'pick' && pick) r = applyPicklist(r, codes.map(c => c.text), pick.lines);
     showForm(r, file);
     if (!codes.length) toast('Kein Barcode erkannt. Bitte alle Felder prüfen.');
   } catch (err) {
@@ -373,5 +389,40 @@ $('clear').onclick = () => {
   list = []; save(); render();
 };
 
+/* ---------- Update-Hinweis (wie MeinMoney) ---------- */
+// Die App startet aus dem Service-Worker-Cache. Im Hintergrund wird geprüft, ob online eine neuere Version liegt
+// (index.html verrät sie per app.js?v=...). Dann erscheint "Neue Version verfügbar" mit Knopf.
+let lastUpdCheck = 0;
+async function checkUpdate() {
+  if (Date.now() - lastUpdCheck < 10 * 60 * 1000 || !navigator.onLine) return;
+  lastUpdCheck = Date.now();
+  try {
+    const r = await fetch('index.html?nocache=' + Date.now(), { cache: 'no-store' });
+    if (!r.ok) return;
+    const v = ((await r.text()).match(/app\.js\?v=([\w.-]+)/) || [])[1];
+    if (v && v !== APP_VERSION) $('update').hidden = false;
+  } catch {}
+}
+async function applyUpdate() {
+  try {
+    // frische Seite direkt in den Cache legen, sonst zeigt der Service Worker beim Neuladen noch die alte
+    const fresh = await fetch('index.html?nocache=' + Date.now(), { cache: 'no-store' });
+    if ('caches' in window && fresh.ok) {
+      const k = (await caches.keys()).find(x => x.startsWith('lagerbuddy-'));
+      if (k) {
+        const c = await caches.open(k);
+        await c.put(new Request(new URL('index.html', location.href)), fresh.clone());
+        await c.put(new Request(new URL('./', location.href)), fresh.clone());
+      }
+    }
+  } catch {}
+  location.reload();
+}
+$('updBtn').onclick = applyUpdate;
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') setTimeout(checkUpdate, 1500); });
+$('ver').textContent = 'v' + APP_VERSION;
+if ('serviceWorker' in navigator && /^https?:$/.test(location.protocol)) navigator.serviceWorker.register('sw.js').catch(() => {});
+
 $('modeSwitch').hidden = !PICK_ENABLED;
 render();
+setTimeout(checkUpdate, 1500);

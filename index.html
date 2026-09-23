@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'sha256-pyAZQhAoROmHb4+3wfdEAw3zHFhHGZ4psETpqC9lRSM='; img-src 'self' blob:; connect-src 'self' blob: data:; worker-src 'self' blob:; manifest-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'sha256-D5/jUFJOfx1kFxp2pwZKI4m+KankXUFcSJV0Aw3dbZk='; img-src 'self' blob:; connect-src 'self' blob: data:; worker-src 'self' blob:; manifest-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'">
 <meta name="referrer" content="no-referrer">
 <meta name="theme-color" content="#0B4F82">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -36,6 +36,7 @@ h2{font-size:15px;color:var(--mute);font-weight:600;margin:24px 0 8px;text-trans
 #pickList{list-style:none;margin:0;padding:0;display:grid;gap:8px}
 .pick-line.done{border-color:var(--ok)}
 .pick-line.done .nums{color:var(--ok)}
+.pick-note{color:var(--warn);font-weight:600}
 .btn svg{width:22px;height:22px;flex:none}
 .primary{background:var(--green);border-color:var(--green);color:#04170b}
 .big{min-height:72px;font-size:19px}
@@ -55,7 +56,10 @@ h2{font-size:15px;color:var(--mute);font-weight:600;margin:24px 0 8px;text-trans
 .tag:empty{display:none}
 .tag.ok{color:var(--ok);background:#5cb85c1f}.tag.check{color:var(--warn);background:#e6953a1f}
 #list{list-style:none;margin:0;padding:0;display:grid;gap:8px}
-#list li{display:grid;grid-template-columns:1fr auto;gap:10px;align-items:start}
+#list li{display:grid;grid-template-columns:1fr auto auto;gap:4px;align-items:start}
+.ver{color:#fff;opacity:.75;font-size:12px}
+.update{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:12px;border-color:var(--green)}
+.update .btn{width:auto}
 .entry{all:unset;display:grid;gap:4px;min-width:0;cursor:pointer;border-radius:8px}
 .entry:focus-visible{outline:2px solid var(--green);outline-offset:4px}
 .nums{font-weight:700;font-variant-numeric:tabular-nums;word-break:break-all}.nums b{color:var(--green)}
@@ -71,9 +75,13 @@ h2{font-size:15px;color:var(--mute);font-weight:600;margin:24px 0 8px;text-trans
 </style>
 </head>
 <body>
-<header><h1>Lager<span>Buddy</span></h1></header>
+<header><h1>Lager<span>Buddy</span></h1><span class="ver" id="ver"></span></header>
 
 <main>
+  <div class="card update" id="update" role="status" hidden>
+    <span><b>Neue Version verfügbar</b><br><span class="sub">Mit einem Tipp aktualisieren.</span></span>
+    <button class="btn primary" type="button" id="updBtn">Aktualisieren</button>
+  </div>
   <div class="row mode" id="modeSwitch" hidden>
     <button class="btn mode-btn active" type="button" id="modeScan" aria-pressed="true">Erfassen</button>
     <button class="btn mode-btn" type="button" id="modePick" aria-pressed="false">Pickliste</button>
@@ -118,7 +126,7 @@ h2{font-size:15px;color:var(--mute);font-weight:600;margin:24px 0 8px;text-trans
   <div id="pickView" hidden>
     <div class="card" id="pickEmpty">
       <button class="btn primary" type="button" id="pickChoose">Pickliste-Excel auswählen</button>
-      <p class="pick-hint">Erwartet: Spalte „Artikelnummer" plus „Menge"+„Einheit" oder „Anzahl"/„Gewicht". Artikelnummer-Spalte in Excel als Text formatieren, sonst gehen führende Nullen verloren.</p>
+      <p class="pick-hint">Die gewohnte Pickliste-Excel (Artikelnummer/Bezeichnung, Charge/Lot, Menge best.) direkt auswählen. Auch einfache Tabellen mit „Artikelnummer" und „Menge"/„Anzahl"/„Gewicht" gehen.</p>
     </div>
     <div id="pickBody" hidden>
       <div class="card pick-banner" id="pickBanner"></div>
@@ -143,7 +151,7 @@ h2{font-size:15px;color:var(--mute);font-weight:600;margin:24px 0 8px;text-trans
 </div>
 <div id="toast" role="status" aria-live="polite"></div>
 
-<script src="parse.js"></script>
-<script src="app.js"></script>
+<script src="parse.js?v=2026-09-23.2"></script>
+<script src="app.js?v=2026-09-23.2"></script>
 </body>
 </html>

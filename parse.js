@@ -51,48 +51,97 @@ function parseLabel(lines, codes) {
   return r;
 }
 
-// Kopfzeile einer hochgeladenen Pickliste tolerant erkennen (Groß/Klein, Leerzeichen/Bindestrich egal).
-function findCol(headers, names) {
-  const norm = h => String(h).toLowerCase().replace(/[^a-zäöüß0-9]/g, '');
-  const set = new Set(names.map(norm));
-  return headers.find(h => set.has(norm(h)));
+/* ---------- Pickliste ---------- */
+const normH = h => String(h ?? '').toLowerCase().replace(/[^a-zäöüß0-9]/g, '');
+const pickErr = m => Object.assign(new Error(m), { userMessage: true }); // erwartbarer Fehler: nur Toast, kein Konsolenfehler
+const normArt = s => String(s ?? '').toUpperCase().replace(/\s+/g, '');
+const normCharge = s => normArt(s).replace(/^0+(?=.)/, ''); // "0001446028" == "1446028"
+
+// Menge aus Zelle lesen: echte Zahl oder Text wie "8 kg" / "12,5" / "24 Stk".
+function parseQty(raw, text) {
+  if (typeof raw === 'number') return { n: raw, kg: /kg/i.test(text) };
+  const m = String(raw ?? '').match(/(\d+(?:[.,]\d+)?)\s*(kg)?/i);
+  return m ? { n: parseFloat(m[1].replace(',', '.')), kg: !!m[2] } : null;
 }
 
-// rows: XLSX.utils.sheet_to_json(sheet, {defval:''}) -- ein Objekt pro Zeile, Schlüssel = Kopfzeile.
-// Erwartet eine Artikelnummer-Spalte plus entweder Menge+Einheit (wie der eigene Export) oder
-// getrennte Spalten Anzahl (Stück) / Gewicht (kg). Wirft eine Error mit deutschem Text bei Problemen.
-function parsePicklist(rows) {
-  if (!rows.length) throw new Error('Die Excel-Datei enthält keine Zeilen.');
-  const headers = Object.keys(rows[0]);
-  const colArt = findCol(headers, ['artikelnummer', 'artikel', 'artikelnr', 'artnr', 'artikel-nr']);
-  const colMenge = findCol(headers, ['menge', 'mengeprogebinde']);
-  const colEinheit = findCol(headers, ['einheit', 'me']);
-  const colAnzahl = findCol(headers, ['anzahl', 'stück', 'stueck']);
-  const colGewicht = findCol(headers, ['gewicht', 'gewichtkg']);
-  const colBez = findCol(headers, ['bezeichnung1', 'bezeichnung']);
-  if (!colArt) throw new Error('Spalte "Artikelnummer" nicht gefunden.');
-  if (!colMenge && !colAnzahl && !colGewicht) throw new Error('Spalte "Menge", "Anzahl" oder "Gewicht" nicht gefunden.');
+// raw/fmt: XLSX.utils.sheet_to_json(sheet, {header:1, defval:''}) einmal mit raw:true, einmal raw:false
+// (formatierter Text behält "8 kg" und führende Nullen bei als Zahl gespeicherten Chargen).
+// Versteht zwei Aufbauten:
+//  - Druck-Pickliste: Titelzeilen, Kopf "Artikelnummer / Bezeichnung" in einer Spalte, pro Artikel zwei Zeilen
+//    (Nummer + Charge + "8 kg", darunter Bezeichnung + Hinweis wie "GEKÜHLTE WARE")
+//  - einfache Tabelle: eine Zeile pro Artikel mit Menge+Einheit oder Anzahl/Gewicht (wie der eigene Export)
+function parsePicklist(raw, fmt = raw) {
+  const h = raw.findIndex(r => r.some(c => ['artikelnummer', 'artikel', 'artikelnr', 'artnr'].includes(normH(c))));
+  if (h < 0) throw pickErr('Spalte "Artikelnummer" nicht gefunden.');
+  const colArt = raw[h].findIndex(c => ['artikelnummer', 'artikel', 'artikelnr', 'artnr'].includes(normH(c)));
+  // Kopf kann über bis zu drei Zeilen gehen ("Menge" / "best.")
+  const col = names => {
+    for (let i = h; i <= h + 2 && i < raw.length; i++) {
+      const j = raw[i].findIndex((c, k) => k !== colArt && names.some(n => normH(c).startsWith(n)));
+      if (j >= 0) return j;
+    }
+    return -1;
+  };
+  const colCharge = col(['charge', 'lot']), colMenge = col(['menge']), colEinheit = col(['einheit']);
+  const colAnzahl = col(['anzahl']), colGewicht = col(['gewicht']), colBez = col(['bezeichnung']);
+  if (colMenge < 0 && colAnzahl < 0 && colGewicht < 0) throw pickErr('Spalte "Menge", "Anzahl" oder "Gewicht" nicht gefunden.');
 
-  const num = v => parseFloat(String(v).replace(',', '.'));
-  const filled = v => String(v ?? '').trim() !== '';
+  const text = (i, j) => {
+    if (j < 0) return '';
+    const v = raw[i]?.[j], f = fmt[i]?.[j];
+    if (typeof v === 'number') return f !== undefined && f !== '' && !/e[+-]/i.test(String(f)) ? String(f).trim() : String(v);
+    return String(v ?? '').trim();
+  };
+  const qty = i => {
+    for (const [j, forceKg, forceSt] of [[colMenge, false, false], [colAnzahl, false, true], [colGewicht, true, false]]) {
+      if (j < 0 || String(raw[i]?.[j] ?? '').trim() === '') continue;
+      const q = parseQty(raw[i][j], text(i, j));
+      if (!q || !(q.n > 0)) continue;
+      const kg = forceKg || (!forceSt && (q.kg || /kg/i.test(text(i, colEinheit))));
+      return { required: q.n, einheit: kg ? 'kg' : 'Stück' };
+    }
+    return null;
+  };
+  const isArticle = s => /^\d{3,}[A-Z0-9\-/.]*$/i.test(s);
+  const isHeader = s => /^(bezeichnung|artikel|charge|lot|menge|best|einheit|anzahl|gewicht|produktion|logistik)/.test(normH(s));
+
   const lines = [];
-  for (const row of rows) {
-    const artikel = String(row[colArt] ?? '').trim();
-    if (!artikel) continue;
-    let required, einheit;
-    if (colMenge && filled(row[colMenge])) {
-      required = num(row[colMenge]);
-      einheit = /kg/i.test(String(row[colEinheit] ?? '')) ? 'kg' : 'Stück';
-    } else if (colAnzahl && filled(row[colAnzahl])) {
-      required = num(row[colAnzahl]); einheit = 'Stück';
-    } else if (colGewicht && filled(row[colGewicht])) {
-      required = num(row[colGewicht]); einheit = 'kg';
-    } else continue; // Zeile ohne Menge überspringen
-    if (!(required > 0)) continue;
-    lines.push({ artikel, bez: colBez ? String(row[colBez] ?? '').trim() : '', required, einheit, picked: 0, scans: [] });
+  let cur = null;
+  for (let i = h + 1; i < raw.length; i++) {
+    const a = text(i, colArt);
+    if (isArticle(a)) {
+      cur = { artikel: a, bez: colBez >= 0 && colBez !== colArt ? text(i, colBez) : '', charge: text(i, colCharge), hinweis: '',
+        ...(qty(i) || { required: 0, einheit: 'Stück' }), picked: 0, scans: [] };
+      lines.push(cur);
+    } else if (cur && a && !isHeader(a) && !cur.bez) {
+      cur.bez = a; // zweite Zeile eines Artikels: Bezeichnung, daneben evtl. Hinweis
+      const note = text(i, colCharge);
+      if (note && !isHeader(note)) cur.hinweis = note;
+      if (!cur.required) Object.assign(cur, qty(i) || {});
+    }
   }
-  if (!lines.length) throw new Error('Keine gültige Zeile mit Artikelnummer und Menge gefunden.');
-  return lines;
+  const valid = lines.filter(l => l.required > 0);
+  if (!valid.length) throw pickErr('Keine gültige Zeile mit Artikelnummer und Menge gefunden.');
+  const title = h > 0 ? raw.slice(0, h).flat().map(c => String(c).trim()).find(Boolean) || '' : '';
+  return { title, lines: valid, skipped: lines.length - valid.length };
 }
 
-if (typeof module !== 'undefined') module.exports = { cleanLine, parseLabel, parsePicklist };
+// Pickliste-Modus: Barcodes gegen die Liste abgleichen statt nur die Ziffernlänge zu raten.
+// Die Pickliste weiß, welche Artikelnummern und Chargen vorkommen, das ist zuverlässiger.
+function applyPicklist(r, codes, lines) {
+  const all = [...new Set(codes)];
+  const line = lines.find(l => all.some(c => normArt(c) === normArt(l.artikel))) ||
+    lines.find(l => normArt(l.artikel) === normArt(r.artikel));
+  if (!line) return r;
+  const out = { ...r, artikel: line.artikel, artikelCode: all.some(c => normArt(c) === normArt(line.artikel)) || r.artikelCode };
+  if (!out.bez1 && line.bez) out.bez1 = line.bez;
+  const charges = lines.filter(l => normArt(l.artikel) === normArt(line.artikel) && l.charge).map(l => l.charge);
+  const hit = all.find(c => charges.some(x => normCharge(x) === normCharge(c)));
+  const rest = all.filter(c => normArt(c) !== normArt(line.artikel));
+  if (hit) { out.charge = charges.find(x => normCharge(x) === normCharge(hit)); out.chargeCode = true; }
+  else if (rest.length === 1) { out.charge = rest[0]; out.chargeCode = true; }
+  else if (normArt(out.charge) === normArt(line.artikel)) { out.charge = ''; out.chargeCode = false; }
+  return out;
+}
+
+if (typeof module !== 'undefined') module.exports = { cleanLine, parseLabel, parsePicklist, applyPicklist, normArt, normCharge };
