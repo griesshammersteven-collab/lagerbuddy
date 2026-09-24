@@ -2,7 +2,7 @@
 /* LagerBuddy: Etikett fotografieren -> Barcodes + Text lokal auf dem Handy lesen -> Liste -> Excel.
    Alle Bibliotheken liegen in vendor/, kein Foto verlässt das Gerät. Nur Picklisten (Positionen, Zuteilung,
    Buchungen) werden über Supabase zwischen den Handys abgeglichen, wenn SYNC unten eingerichtet ist. */
-const APP_VERSION = '2026-09-24.11'; // bei JEDER Veröffentlichung erhöhen, genauso wie ?v= in index.html
+const APP_VERSION = '2026-09-24.12'; // bei JEDER Veröffentlichung erhöhen, genauso wie ?v= in index.html
 // Alte index.html (CDN/Offline-Speicher) mit neuerem app.js-Inhalt: dann fehlen Knöpfe und der Start bricht ab.
 // Einmal frisch laden (eindeutige URL geht am CDN vorbei), bevor irgendetwas verdrahtet wird.
 {
@@ -396,9 +396,12 @@ function renderPick() {
     const geb = gebindeCount(l.required, l.gebinde);
     prog.textContent = (l.charge ? `Charge ${l.charge} · ` : '') + `${fmtN(l.picked)} / ${fmtN(l.required)} ${l.einheit}` +
       (geb ? ` · ≈ ${fmtN(geb)} Gebinde à ${fmtN(l.gebinde)} ${l.einheit}` : '');
-    const nScan = l.scans.filter(x => !x.manuell).length, nHand = l.scans.length - nScan;
+    const zahl = x => x.anzahl || 1, auto = l.scans.filter(x => !x.manuell);
+    const nScan = auto.reduce((s, x) => s + zahl(x), 0), nHand = l.scans.filter(x => x.manuell).reduce((s, x) => s + zahl(x), 0);
+    const sammel = auto.filter(x => x.anzahl > 1), nBest = sammel.reduce((s, x) => s + x.anzahl - 1, 0);
     const count = document.createElement('div'); count.className = 'sub pick-count';
     count.textContent = (geb ? `Gebinde gescannt: ${nScan} von ${fmtN(geb)}` : `Gebinde gescannt: ${nScan}`) +
+      (nBest ? ` · davon ${nBest} per Sammelbuchung (${[...new Set(sammel.map(x => x.picker || '–'))].join(', ')})` : '') +
       (nHand ? ` · ${nHand}× von Hand (Teamleiter)` : '');
     li.append(head, prog, count);
     if (l.hinweis) { const n = document.createElement('div'); n.className = 'sub pick-note'; n.textContent = l.hinweis; li.append(n); }
@@ -515,6 +518,19 @@ function addPick(e) {
   if (scanned && picks.some(p => p.lines.some(l => l.scans.some(x => x.fp === scanned.fp)))) {
     toast('Dieses Foto wurde schon gebucht. Jedes Gebinde einzeln fotografieren.'); return;
   }
+  const anzahl = anzahlWert();
+  if (anzahl > 1) {
+    const offen = Math.round((line.required - line.picked) * 1000) / 1000;
+    if (line.gebinde && Math.abs(e.menge - line.gebinde) > 0.001) {
+      toast(`Mehrere Gebinde auf einmal nur mit vollen Gebinden (${fmtN(line.gebinde)} ${line.einheit}). Einen Anbruch einzeln scannen.`); return;
+    }
+    if (anzahl * e.menge > offen + 0.001) {
+      toast(`Offen sind nur noch ${fmtN(offen)} ${line.einheit}: höchstens ${Math.floor((offen + 0.001) / e.menge)} Gebinde.`); return;
+    }
+    const summe = Math.round(anzahl * e.menge * 1000) / 1000;
+    if (!confirm(`${anzahl} gleiche Gebinde à ${fmtN(e.menge)} ${e.einheit} = ${fmtN(summe)} ${e.einheit} als gepickt bestätigen?\n\n` +
+      `Gebucht auf ${picker}. Mit OK bestätigst du, alle ${anzahl} Gebinde geprüft zu haben (Artikel, Charge, Menge).`)) return;
+  }
   // Gebindegröße bekannt und Menge weicht ab -> Anbruch oder vertippt: einmal nachfragen statt stillschweigend buchen.
   // Nicht beim letzten Gebinde, wenn genau der vorgeschlagene Rest der Position gebucht wird.
   const rest = Math.round((line.required - line.picked) * 1000) / 1000;
@@ -523,7 +539,8 @@ function addPick(e) {
       !confirm(e.menge < line.gebinde
         ? `Anbruch buchen? Ein volles Gebinde hat ${fmtN(line.gebinde)} ${line.einheit}, gebucht werden ${fmtN(e.menge)} ${e.einheit}.`
         : `Mehr als ein Gebinde? Ein Gebinde hat ${fmtN(line.gebinde)} ${line.einheit}, erfasst wurden ${fmtN(e.menge)} ${e.einheit}. Trotzdem buchen?`)) return;
-  const scan = { ts: e.ts, menge: e.menge, charge: e.charge, picker: e.picker, ...(scanned ? { fp: scanned.fp } : {}), ...(manuell ? { manuell: true } : {}) };
+  const scan = { ts: e.ts, menge: e.menge, charge: e.charge, picker: e.picker, ...(anzahl > 1 ? { anzahl } : {}),
+    ...(scanned ? { fp: scanned.fp } : {}), ...(manuell ? { manuell: true } : {}) };
   if (!commit(pick.id, { t: 'scan', lid: line.lid, scan })) return;
   // Gebindegröße noch unbekannt: das erste gescannte Gebinde legt sie fest, ab dann gilt "ein Scan = ein Gebinde".
   // War eine Größe gemerkt (anderes Handy/andere Liste) und das erste Gebinde ist ein Anbruch, gilt die gemerkte.
@@ -534,7 +551,7 @@ function addPick(e) {
   renderPick(); closeForm();
   toast(l.picked >= l.required
     ? `Fertig: ${e.artikel} (${fmtN(l.picked)}/${fmtN(l.required)} ${l.einheit})`
-    : `Gebucht: ${fmtN(e.menge)} ${e.einheit} für ${e.artikel} (${fmtN(l.picked)}/${fmtN(l.required)})`);
+    : `Gebucht: ${anzahl > 1 ? anzahl + ' × ' : ''}${fmtN(e.menge)} ${e.einheit} für ${e.artikel} (${fmtN(l.picked)}/${fmtN(l.required)})`);
 }
 // target: { replaceId } = Positionen dieser Liste ersetzen (Zuteilung bleibt), sonst neue Liste für target.fuer
 function applyParsedPicklist({ title, von, nach, lines, skipped }, sourceName, target, hinweis) {
@@ -756,6 +773,30 @@ $('menge').addEventListener('input', () => { mengeVonHand = true; renderMengeTag
 // Artikelnummer von Hand eingetippt/korrigiert: Vorschlag nachziehen, solange die Menge nicht selbst geändert wurde
 $('artikel').addEventListener('input', () => { if (!mengeVonHand && editIdx === null) fillMenge({ artikel: $('artikel').value }); });
 
+/* ---------- Mehrere gleiche Gebinde auf einmal (Sammelbuchung) ---------- */
+// Ein Gebinde wird gescannt (belegt Artikel und Charge per Barcode), weitere gleiche bestätigt der Picker mit der
+// Anzahl -- statt 14-mal zu scannen. Die Buchung trägt Picker und Uhrzeit: passt etwas nicht, ist klar, wer bestätigt hat.
+function anzahlWert() { const n = parseInt($('anzahl').value, 10); return n > 0 ? n : 1; }
+function anzahlMax() { // so viele volle Gebinde passen noch in die offene Menge der aktuellen Position
+  const l = currentPickLine(), m = parseFloat($('menge').value.trim().replace(',', '.'));
+  if (!l || !(m > 0) || normArt(l.artikel) !== normArt($('artikel').value)) return 0;
+  return Math.floor((l.required - l.picked + 0.001) / m);
+}
+function renderAnzahl() {
+  if ($('anzahlRow').hidden) return;
+  const max = anzahlMax(), n = anzahlWert();
+  $('anzAlle').hidden = max < 2;
+  $('anzAlle').textContent = `Alle ${max}`;
+  $('t-anzahl').className = 'tag' + (n > 1 ? ' check' : '');
+  $('t-anzahl').textContent = n > 1 ? 'Sammelbuchung' : '';
+  $('formSubmit').textContent = n > 1 ? `${n} Gebinde buchen` : 'Gebinde buchen';
+}
+const setAnzahl = n => { $('anzahl').value = String(Math.max(1, n)); renderAnzahl(); };
+$('anzMinus').onclick = () => setAnzahl(anzahlWert() - 1);
+$('anzPlus').onclick = () => setAnzahl(anzahlWert() + 1);
+$('anzAlle').onclick = () => setAnzahl(anzahlMax());
+for (const id of ['anzahl', 'menge', 'artikel']) $(id).addEventListener('input', renderAnzahl);
+
 // Herkunft des Formulars: Etikett-Foto (mit/ohne erkannten Artikel-Barcode, Fingerabdruck der Datei) oder von Hand
 let formScan = null;
 function showForm(r, file, idx = null) {
@@ -781,12 +822,15 @@ function showForm(r, file, idx = null) {
     for (const el of document.getElementsByName('einheit')) el.checked = el.value === r.einheit;
     renderMengeTag();
   }
+  $('anzahlRow').hidden = !(mode === 'pick' && idx === null);
+  $('anzahl').value = '1';
   $('lagerplatz').value = r.lagerplatz || (mode === 'pick' && pick ? [pick.von, pick.nach].filter(Boolean).join(' → ') : '');
   if (previewUrl) URL.revokeObjectURL(previewUrl);
   previewUrl = file ? URL.createObjectURL(file) : null;
   $('preview').hidden = !file;
   if (file) $('preview').src = previewUrl; else $('preview').removeAttribute('src');
   $('form').hidden = false; $('scan').hidden = true; $('bar').hidden = true; $('modeSwitch').hidden = true;
+  renderAnzahl();
   $('form').scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 function closeForm() {
@@ -1053,16 +1097,23 @@ async function exportPick(p) {
       ['Exportiert', `${dt(Date.now())} von ${picker}`],
       [],
       ['Pos.', 'Artikelnummer', 'Bezeichnung', 'Charge', 'Menge soll', 'Menge gepickt', 'Differenz', 'Einheit', 'Gebindegröße',
-        'Gebinde gescannt', 'davon von Hand', 'Status', 'Hinweis'],
-      ...p.lines.map((l, i) => [i + 1, l.artikel, l.bez || '', l.charge || '', l.required, r3(l.picked), r3(l.picked - l.required), l.einheit,
-        l.gebinde ?? '', l.scans.filter(x => !x.manuell).length, l.scans.filter(x => x.manuell).length, status(l), l.hinweis || '']),
+        'Gebinde gescannt', 'Gebinde per Sammelbuchung bestätigt', 'Gebinde von Hand', 'Status', 'Hinweis'],
+      ...p.lines.map((l, i) => {
+        const auto = l.scans.filter(x => !x.manuell);
+        return [i + 1, l.artikel, l.bez || '', l.charge || '', l.required, r3(l.picked), r3(l.picked - l.required), l.einheit, l.gebinde ?? '',
+          auto.length, auto.reduce((s, x) => s + (x.anzahl || 1) - 1, 0), l.scans.filter(x => x.manuell).reduce((s, x) => s + (x.anzahl || 1), 0),
+          status(l), l.hinweis || ''];
+      }),
     ];
-    const buchungen = [['Pos.', 'Artikelnummer', 'Charge soll', 'Charge gescannt', 'Menge', 'Einheit', 'Picker', 'Zeitpunkt', 'Buchung'],
+    const art = x => (x.manuell ? 'von Hand' : x.anzahl > 1 ? `Sammelbuchung: 1 gescannt, ${x.anzahl - 1} vom Picker bestätigt` : 'Scan');
+    const buchungen = [['Pos.', 'Artikelnummer', 'Charge soll', 'Charge gescannt', 'Gebinde', 'Menge je Gebinde', 'Menge gesamt', 'Einheit',
+      'Picker', 'Zeitpunkt', 'Buchung'],
       ...p.lines.flatMap((l, i) => l.scans.map(x => ({ l, i, x }))).sort((a, b) => a.x.ts - b.x.ts)
-        .map(({ l, i, x }) => [i + 1, l.artikel, l.charge || '', x.charge || '', x.menge, l.einheit, x.picker || '', dt(x.ts), x.manuell ? 'von Hand' : 'Scan'])];
+        .map(({ l, i, x }) => [i + 1, l.artikel, l.charge || '', x.charge || '', x.anzahl || 1, x.menge, r3(x.menge * (x.anzahl || 1)), l.einheit,
+          x.picker || '', dt(x.ts), art(x)])];
     const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, textSheet(kopf, [16, 18, 30, 16, 11, 13, 10, 8, 13, 15, 14, 24, 20]), 'Pickliste');
-    XLSX.utils.book_append_sheet(wb, textSheet(buchungen, [6, 18, 16, 16, 10, 8, 10, 20, 10]), 'Buchungen');
+    XLSX.utils.book_append_sheet(wb, textSheet(kopf, [16, 18, 30, 16, 11, 13, 10, 8, 13, 15, 18, 15, 24, 20]), 'Pickliste');
+    XLSX.utils.book_append_sheet(wb, textSheet(buchungen, [6, 18, 16, 16, 8, 15, 13, 8, 10, 20, 44]), 'Buchungen');
     // Dateiname nur ASCII: Umlaute machen Ärger in Windows-Freigaben, Mail-Anhängen und beim Download selbst
     const slug = t => t.replace(/->|→/g, ' ').replace(/[äöüÄÖÜß]/g, c => ({ ä: 'ae', ö: 'oe', ü: 'ue', Ä: 'Ae', Ö: 'Oe', Ü: 'Ue', ß: 'ss' })[c])
       .normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^A-Za-z0-9-]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 60);
