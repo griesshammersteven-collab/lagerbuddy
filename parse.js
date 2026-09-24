@@ -211,6 +211,40 @@ function gebindeCount(required, gebinde) {
 // Idee: Spalten eines gedruckten Tabellenrasters erkennt man daran, dass die linken Kanten der Wörter
 // sich auf ein paar x-Positionen häufen, mit deutlichen Lücken dazwischen (Spaltenabstand) -- anders als
 // der enge, unregelmäßige Abstand zwischen Wörtern innerhalb einer Spalte/Zelle.
+// Tabellenlinien vor der Texterkennung entfernen: die dicken Rasterlinien der Druck-Pickliste hält Tesseract
+// sonst für Text/Blöcke und liest dann fast nichts (echtes Foto 23.09.2026: 8 von 17 Werten, ohne Linien 14).
+// rgba: ImageData.data, Ergebnis: neues RGBA-Bild, Schrift schwarz auf weiß.
+// Tinte = deutlich dunkler als die Umgebung (lokaler Mittelwert statt fester Schwelle: Schatten/Hallenlicht);
+// dunkelster Farbkanal, damit rote Überschriften genauso zählen wie schwarze Schrift.
+// Linie = Tintenlauf, der länger ist als 6 % der Bildbreite/-höhe (Buchstaben sind viel kürzer, auch leicht schräge
+// Linien ergeben noch lange Läufe), plus ein paar Pixel Rand drumherum.
+function stripTableLines(rgba, W, H) {
+  const N = W * H, v = new Uint8Array(N);
+  for (let p = 0, i = 0; p < N; p++, i += 4) v[p] = Math.min(rgba[i], rgba[i + 1], rgba[i + 2]);
+  const sum = new Float64Array((W + 1) * (H + 1)); // Integralbild für den Mittelwert im Fenster
+  for (let y = 0; y < H; y++) { let row = 0; for (let x = 0; x < W; x++) { row += v[y * W + x]; sum[(y + 1) * (W + 1) + x + 1] = sum[y * (W + 1) + x + 1] + row; } }
+  const r = Math.max(8, Math.round(W / 40)), ink = new Uint8Array(N);
+  for (let y = 0; y < H; y++) {
+    const y0 = Math.max(0, y - r), y1 = Math.min(H, y + r + 1);
+    for (let x = 0; x < W; x++) {
+      const x0 = Math.max(0, x - r), x1 = Math.min(W, x + r + 1);
+      const mean = (sum[y1 * (W + 1) + x1] - sum[y0 * (W + 1) + x1] - sum[y1 * (W + 1) + x0] + sum[y0 * (W + 1) + x0]) / ((x1 - x0) * (y1 - y0));
+      ink[y * W + x] = v[y * W + x] < mean * 0.75 ? 1 : 0;
+    }
+  }
+  const line = new Uint8Array(N);
+  const runs = (n, len, at) => { let s = 0; for (let k = 0; k <= n; k++) if (k === n || !ink[at(k)]) { if (k - s >= len) for (let j = s; j < k; j++) line[at(j)] = 1; s = k + 1; } };
+  for (let y = 0; y < H; y++) runs(W, Math.round(W * 0.06), x => y * W + x);
+  for (let x = 0; x < W; x++) runs(H, Math.round(H * 0.06), y => y * W + x);
+  // Linienrand (Kantenpixel) mitnehmen: Maske in beide Richtungen verbreitern
+  const g = Math.max(2, Math.round(W / 600)), tmp = new Uint8Array(N), wide = new Uint8Array(N);
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) if (line[y * W + x]) for (let d = Math.max(0, x - g); d <= Math.min(W - 1, x + g); d++) tmp[y * W + d] = 1;
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) if (tmp[y * W + x]) for (let d = Math.max(0, y - g); d <= Math.min(H - 1, y + g); d++) wide[d * W + x] = 1;
+  const out = new Uint8ClampedArray(N * 4);
+  for (let p = 0, i = 0; p < N; p++, i += 4) { out[i] = out[i + 1] = out[i + 2] = ink[p] && !wide[p] ? 0 : 255; out[i + 3] = 255; }
+  return out;
+}
+
 function picklistGridFromWords(ocrLines, width) {
   // 1) Innerhalb jeder OCR-Zeile eng benachbarte Wörter (normaler Wortabstand) zu Textfragmenten zusammenfassen,
   //    damit ein langes erstes Wort einer Zelle das zweite nicht über dessen x0 in eine falsche Spalte schiebt.
@@ -218,12 +252,17 @@ function picklistGridFromWords(ocrLines, width) {
   const localGap = width * 0.012;
   const frags = [];
   for (const l of ocrLines) {
-    const ws = (l.words || []).filter(w => w.confidence >= 40 && w.text.trim() && !/^[|¦![\]()—–_=~.,:;'"`]+$/.test(w.text.trim())) // Handschrift/Rauschen meist unsicher
-      .map(w => ({ text: w.text.trim(), x0: w.bbox.x0, x1: w.bbox.x1, y: w.bbox.y1 != null ? (w.bbox.y0 + w.bbox.y1) / 2 : (l.bbox?.y0 ?? w.bbox.y0) }))
+    // Unsichere Wörter (Handschrift/Rauschen) fliegen raus -- außer kurzen Zahlen/"kg"/"->": die liest Tesseract im
+    // echten Foto richtig, meldet aber 0-30 % ("225 kg", "75 kg", "B4 -> Bühl"). Falsches fällt über den Aufbau raus.
+    const sure = w => w.confidence >= 40 || /^([A-Za-z]?\d+([.,]\d+)?[A-Za-z]?|\d+([.,]\d+)?kg|kg|->|→)$/i.test(w.text.trim());
+    const ws = (l.words || []).filter(w => sure(w) && w.text.trim() && !/^[|¦![\]()—–_=~.,:;'"`]+$/.test(w.text.trim()))
+      .map(w => ({ text: w.text.trim(), x0: w.bbox.x0, x1: w.bbox.x1, h: w.bbox.y1 != null ? w.bbox.y1 - w.bbox.y0 : 0,
+        y: w.bbox.y1 != null ? (w.bbox.y0 + w.bbox.y1) / 2 : (l.bbox?.y0 ?? w.bbox.y0) }))
       .sort((a, b) => a.x0 - b.x0);
     let cur = null;
     for (const w of ws) {
-      if (cur && w.x0 - cur.x1 <= localGap) { cur.text += ' ' + w.text; cur.x1 = w.x1; cur.ys.push(w.y); }
+      // große Schrift (Titel "B4 -> Bühl") hat größere Wortabstände: Grenze wächst mit der Schrifthöhe mit
+      if (cur && w.x0 - cur.x1 <= Math.max(localGap, 0.8 * w.h)) { cur.text += ' ' + w.text; cur.x1 = w.x1; cur.ys.push(w.y); }
       else { cur = { text: w.text, x0: w.x0, x1: w.x1, ys: [w.y] }; frags.push(cur); }
     }
   }
@@ -244,8 +283,9 @@ function picklistGridFromWords(ocrLines, width) {
   const isArt = f => /^\d{3,}[A-Z0-9\-/.]*$/i.test(firstTok(f.text));
   const anyHead = f => /^(artikel|bezeichnung|charge|lot|menge|best|einheit|anzahl|gewicht|gebinde|produktion|logistik)/.test(normH(f.text));
   const colHead = f => /^(charge|lot|menge|einheit|anzahl|gewicht|bezeichnung|gebinde)/.test(normH(f.text));
-  // Ohne "Artikel…"-Überschrift ist es keine Pickliste (z. B. ein Etikett) -- tolerant gegen Lesefehler am Wortende
-  const artHead = frags.find(f => /^(artikel|artnr)/.test(normH(f.text)));
+  // Ohne "Artikel…"-Überschrift ist es keine Pickliste (z. B. ein Etikett) -- tolerant gegen Lesefehler an den
+  // Rändern: im echten Foto kam "rtikelnummer" (A am Tabellenstrich abgeschnitten)
+  const artHead = frags.find(f => /tikel|artnr/.test(normH(f.text)));
   if (!artHead) return [];
   const artCol = artHead.col, headY = artHead.y;
 
@@ -254,13 +294,35 @@ function picklistGridFromWords(ocrLines, width) {
     if (isArt(f)) recs.push({ y: f.y, art: firstTok(f.text), bez: [] });
     else if (recs.length && !anyHead(f)) recs.at(-1).bez.push(f.text);
   }
+  // Erstes Zeichen am Zellrand verschluckt ("10006349PFL"), dieselbe Nummer steht aber vollständig in einer anderen
+  // Zeile (gleicher Artikel, zweite Charge) -> die vollständige nehmen
+  for (const r of recs) r.art = recs.find(o => o.art.length === r.art.length + 1 && o.art.endsWith(r.art))?.art || r.art;
   const pitch = recs.length > 1 ? (recs.at(-1).y - recs[0].y) / (recs.length - 1) : Infinity;
 
+  // Werte-Spalten (x0-Cluster unter der Kopfzeile) bekommen die Überschrift, die sich horizontal am meisten mit
+  // ihnen überlappt: gedruckte Werte stehen oft zentriert, die Überschrift linksbündig -- ihre linken Kanten landen
+  // dann in verschiedenen Clustern ("Charge / Lot" x436, Chargen x550 im echten Foto).
+  const firstY = recs.length ? recs[0].y : Infinity;
+  const heads = frags.filter(f => f.col !== artCol && colHead(f) && f.y < firstY);
+  const groups = new Map();
+  for (const f of frags) {
+    if (f.col === artCol || f.y <= headY || anyHead(f)) continue;
+    if (!groups.has(f.col)) groups.set(f.col, []);
+    groups.get(f.col).push(f);
+  }
+  const byHead = new Map();
+  for (const [c, vs] of groups) {
+    const x0 = Math.min(...vs.map(f => f.x0)), x1 = Math.max(...vs.map(f => f.x1));
+    const ov = h => Math.min(x1, h.x1) - Math.max(x0, h.x0);
+    const head = heads.filter(h => ov(h) > 0).sort((a, b) => ov(b) - ov(a))[0];
+    const key = head || 'col' + c;
+    if (!byHead.has(key)) byHead.set(key, { head, x0, vals: [] });
+    byHead.get(key).vals.push(...vs);
+  }
+
   const cols = [];
-  for (const c of [...new Set(frags.map(f => f.col))].filter(c => c !== artCol).sort((a, b) => a - b)) {
-    const inCol = frags.filter(f => f.col === c);
-    const head = inCol.filter(colHead).sort((a, b) => Math.abs(a.y - headY) - Math.abs(b.y - headY))[0];
-    const vals = inCol.filter(f => f.y > (head ? head.y : headY) && !anyHead(f)).sort(byY);
+  for (const { head, vals: unsorted } of [...byHead.values()].sort((a, b) => a.x0 - b.x0)) {
+    const vals = unsorted.sort(byY);
     const main = recs.map(() => ''), second = recs.map(() => '');
     const add = (arr, k, t) => { arr[k] = arr[k] ? arr[k] + ' ' + t : t; };
     const withDigit = vals.filter(f => /\d/.test(f.text));
@@ -315,4 +377,4 @@ function applyPicklist(r, codes, lines) {
   return out;
 }
 
-if (typeof module !== 'undefined') module.exports = { cleanLine, parseLabel, parsePicklist, applyPicklist, picklistGridFromWords, gebindeCount, normArt, normCharge, requiredLabelColor, classifyLabelColor };
+if (typeof module !== 'undefined') module.exports = { cleanLine, parseLabel, parsePicklist, applyPicklist, picklistGridFromWords, stripTableLines, gebindeCount, normArt, normCharge, requiredLabelColor, classifyLabelColor };

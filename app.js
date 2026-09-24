@@ -1,7 +1,7 @@
 'use strict';
 /* LagerBuddy: Etikett fotografieren -> Barcodes + Text lokal auf dem Handy lesen -> Liste -> Excel.
    Alle Bibliotheken liegen in vendor/, kein Bild und keine Nummer verlässt das Gerät. */
-const APP_VERSION = '2026-09-23.16'; // bei JEDER Veröffentlichung erhöhen, genauso wie ?v= in index.html
+const APP_VERSION = '2026-09-23.17'; // bei JEDER Veröffentlichung erhöhen, genauso wie ?v= in index.html
 // Alte index.html (CDN/Offline-Speicher) mit neuerem app.js-Inhalt: dann fehlen Knöpfe und der Start bricht ab.
 // Einmal frisch laden (eindeutige URL geht am CDN vorbei), bevor irgendetwas verdrahtet wird.
 {
@@ -316,8 +316,16 @@ async function loadPicklistPhoto(file) {
   let canvas;
   try {
     canvas = await toCanvas(file, 3000); // mehr Auflösung als beim Etikett: kleine Schrift über die ganze Seite
+    const ctx = canvas.getContext('2d');
+    const img = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    img.data.set(stripTableLines(img.data, canvas.width, canvas.height));
+    ctx.putImageData(img, 0, 0);
     const worker = await getTessWorker();
-    const r = await withTimeout(worker.recognize(canvas), 120000, 'Texterkennung hat zu lange gedauert');
+    // PSM 11 = verstreute Textstücke statt Seitenlayout: eine Tabelle ist kein Fließtext
+    await worker.setParameters({ tessedit_pageseg_mode: '11' });
+    let r;
+    try { r = await withTimeout(worker.recognize(canvas, { rotateAuto: true }), 120000, 'Texterkennung hat zu lange gedauert'); }
+    finally { await worker.setParameters({ tessedit_pageseg_mode: '3' }); } // Etiketten lesen weiter mit Seitenlayout
     const grid = picklistGridFromWords(r.data.lines, canvas.width);
     applyParsedPicklist(parsePicklist(grid, grid), file.name,
       ' Bitte die Zeilen unten prüfen – von einem Foto liest die App nicht so zuverlässig wie aus Excel.');
