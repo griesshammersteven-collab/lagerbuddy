@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'sha256-IuvL1N2aCilyCdBnIbs57PB2+2iGGx9zvehhAqMoB4c='; img-src 'self' blob:; connect-src 'self' blob: data:; worker-src 'self' blob:; manifest-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'sha256-SXlXvUiZi305wYwHsrjeZ6PMLlSWytHh3aEUS5psdjk='; img-src 'self' blob:; connect-src 'self' blob: data: https://*.supabase.co; worker-src 'self' blob:; manifest-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'">
 <meta name="referrer" content="no-referrer">
 <meta name="theme-color" content="#0B4F82">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -36,6 +36,11 @@ h2{font-size:15px;color:var(--mute);font-weight:600;margin:24px 0 8px;text-trans
 .pick-hint{color:var(--mute);font-size:13px;margin-top:10px}
 #pickChoose,#pickGalBtn{margin-top:10px}
 #pickPhotoReplace{width:auto;margin:10px 0}
+.sync-state{margin:0 0 10px;font-size:13px;font-weight:600;color:var(--ok)}
+.sync-state.warn{color:var(--warn)}
+.lager-row{display:grid;grid-template-columns:1fr auto;gap:10px}
+.lager-row input{min-height:48px;padding:10px 12px;border-radius:10px;border:1px solid var(--line);background:#041019;color:var(--text);font:inherit;font-size:17px;width:100%}
+.lager-row .btn{width:auto}
 .pick-back{width:auto;min-height:40px;margin:14px 0 10px;font-size:14px}
 .pick-fuer{display:flex;align-items:center;justify-content:space-between;gap:10px;color:var(--mute);font-size:14px;font-weight:600;margin-bottom:12px}
 #pickFuerEditRow{margin:0 0 8px}
@@ -76,6 +81,8 @@ h2{font-size:15px;color:var(--mute);font-weight:600;margin:24px 0 8px;text-trans
 .f label{display:flex;justify-content:space-between;align-items:baseline;font-size:13px;color:var(--mute);margin-bottom:4px}
 .f input{width:100%;min-height:48px;padding:10px 12px;border-radius:10px;border:1px solid var(--line);background:#041019;color:var(--text);font:inherit;font-size:17px}
 .f input:focus{outline:2px solid var(--green);border-color:transparent}
+.f input[readonly]{opacity:.7}
+.pick-count{font-weight:600}
 .tag{font-size:12px;font-weight:600;padding:2px 8px;border-radius:99px}
 .tag:empty{display:none}
 .label-check{padding:10px 12px;border-radius:10px;font-weight:600;font-size:15px;border:1px solid var(--line)}
@@ -118,10 +125,20 @@ h2{font-size:15px;color:var(--mute);font-weight:600;margin:24px 0 8px;text-trans
 <div class="gate" id="gate">
   <div class="gate-card">
     <h1>Lager<span>Buddy</span></h1>
-    <p class="gate-lead">Wer sind Sie?</p>
-    <div class="gate-grid" id="gatePickers"></div>
-    <p class="gate-lead">Teamleiter</p>
-    <div class="gate-grid" id="gateMasters"></div>
+    <form id="lagerForm" hidden autocomplete="off">
+      <p class="gate-lead">Handy einrichten</p>
+      <div class="lager-row">
+        <input id="lagerCode" type="password" placeholder="Lager-Code" aria-label="Lager-Code" maxlength="100" autocapitalize="off" spellcheck="false">
+        <button class="btn primary" type="submit" id="lagerBtn">Weiter</button>
+      </div>
+      <p class="pick-hint">Einmal pro Handy. Den Lager-Code gibt es beim Teamleiter.</p>
+    </form>
+    <div id="gateWho">
+      <p class="gate-lead">Wer sind Sie?</p>
+      <div class="gate-grid" id="gatePickers"></div>
+      <p class="gate-lead">Teamleiter</p>
+      <div class="gate-grid" id="gateMasters"></div>
+    </div>
   </div>
 </div>
 
@@ -140,7 +157,7 @@ h2{font-size:15px;color:var(--mute);font-weight:600;margin:24px 0 8px;text-trans
   <section id="scan">
     <label class="btn primary big" id="camBtn">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3z"/><circle cx="12" cy="13" r="3"/></svg>
-      Etikett fotografieren
+      <span id="camText">Etikett fotografieren</span>
       <input class="file" type="file" accept="image/*" capture="environment" id="cam">
     </label>
     <div class="row">
@@ -177,6 +194,7 @@ h2{font-size:15px;color:var(--mute);font-weight:600;margin:24px 0 8px;text-trans
   <input class="file" type="file" accept=".xlsx,.xls" id="pickFile">
   <input class="file" type="file" accept="image/*" capture="environment" id="pickCam">
   <div id="pickView" hidden>
+    <p class="sync-state" id="syncState" role="status" hidden></p>
     <div id="pickOverview">
       <h2 id="pickCardsHead">Picklisten</h2>
       <ul id="pickCards"></ul>
@@ -229,7 +247,8 @@ h2{font-size:15px;color:var(--mute);font-weight:600;margin:24px 0 8px;text-trans
 </div>
 <div id="toast" role="status" aria-live="polite"></div>
 
-<script src="parse.js?v=2026-09-24.1"></script>
-<script src="app.js?v=2026-09-24.1"></script>
+<script src="parse.js?v=2026-09-24.3"></script>
+<script src="picks.js?v=2026-09-24.3"></script>
+<script src="app.js?v=2026-09-24.3"></script>
 </body>
 </html>

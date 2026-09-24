@@ -1,7 +1,8 @@
 'use strict';
 /* LagerBuddy: Etikett fotografieren -> Barcodes + Text lokal auf dem Handy lesen -> Liste -> Excel.
-   Alle Bibliotheken liegen in vendor/, kein Bild und keine Nummer verlässt das Gerät. */
-const APP_VERSION = '2026-09-24.1'; // bei JEDER Veröffentlichung erhöhen, genauso wie ?v= in index.html
+   Alle Bibliotheken liegen in vendor/, kein Foto verlässt das Gerät. Nur Picklisten (Positionen, Zuteilung,
+   Buchungen) werden über Supabase zwischen den Handys abgeglichen, wenn SYNC unten eingerichtet ist. */
+const APP_VERSION = '2026-09-24.3'; // bei JEDER Veröffentlichung erhöhen, genauso wie ?v= in index.html
 // Alte index.html (CDN/Offline-Speicher) mit neuerem app.js-Inhalt: dann fehlen Knöpfe und der Start bricht ab.
 // Einmal frisch laden (eindeutige URL geht am CDN vorbei), bevor irgendetwas verdrahtet wird.
 {
@@ -13,8 +14,15 @@ const APP_VERSION = '2026-09-24.1'; // bei JEDER Veröffentlichung erhöhen, gen
 }
 const LOCAL = new URL('vendor/', location.href).href;
 const KEY = 'lagerbuddy_v1';
-const KEY_PICK = 'lagerbuddy_pick_v1'; // alt: genau eine Pickliste, wird beim Start nach KEY_PICKS übernommen
-const KEY_PICKS = 'lagerbuddy_picks_v1'; // mehrere Picklisten, jede einem Picker zugeteilt
+const KEY_PICK = 'lagerbuddy_pick_v1'; // alt: genau eine Pickliste
+const KEY_PICKS = 'lagerbuddy_picks_v1'; // alt: mehrere Picklisten, nur auf diesem Handy
+const KEY_SYNC = 'lagerbuddy_picks_v2'; // { base, pending, seit }, siehe "Abgleich" unten
+const KEY_LAGER = 'lagerbuddy_lager'; // Lager-Code dieses Handys (einmal eingeben)
+// Supabase-Projekt, über das die Handys ihre Picklisten abgleichen (Einrichtung: supabase/ANLEITUNG.md).
+// Der Schlüssel ist der öffentliche "publishable"/"anon"-Schlüssel -- geschützt wird über den Lager-Code.
+// Leer = kein Abgleich, Picklisten bleiben nur auf diesem Handy.
+const SYNC = window.__testSync || { url: '', key: '' };
+const SYNC_ON = !!(SYNC.url && SYNC.key);
 const FIELDS = ['artikel', 'bez1', 'bez2', 'charge'];
 const fmtN = n => n.toLocaleString('de-DE');
 const PICK_ENABLED = true;
@@ -25,8 +33,10 @@ const newId = () => Date.now().toString(36) + Math.random().toString(36).slice(2
 try { navigator.storage?.persist?.(); } catch {} // hilft gegen Löschen durch den Browser nach längerer Nichtnutzung
 
 let list = load();
-let picks = loadPicks();
-let pick = null; // die gerade geöffnete Pickliste (ein Eintrag aus picks), null = Übersicht
+let sync = loadSync();
+let picks = []; // aktueller Stand aller Picklisten = Serverstand + eigene, noch nicht übertragene Änderungen
+let openId = null; // id der geöffneten Pickliste, null = Übersicht
+let pick = null; // die geöffnete Pickliste aus picks (nach jedem recompute neu gesetzt)
 let picker = '', role = ''; // erst nach der Auswahl am Zugangs-Gate gültig, siehe ganz unten
 let mode = 'scan'; // 'scan' (freie Liste) oder 'pick' (Pickliste)
 let busy = false;
@@ -43,22 +53,57 @@ function save() {
   try { localStorage.setItem(KEY, JSON.stringify(list)); return true; }
   catch { toast('Speichern fehlgeschlagen. Ist der Speicher voll?'); return false; }
 }
-function loadPicks() {
-  const ok = v => v && typeof v === 'object' && Array.isArray(v.lines);
+/* ---------- Abgleich der Picklisten zwischen den Handys ----------
+   sync.base: letzter bekannter Serverstand je Liste { doc, rev, geloescht }
+   sync.pending: eigene Änderungen als Operationen (picks.js), die der Server noch nicht bestätigt hat
+   Angezeigt wird immer base + pending. Ohne Server (SYNC leer) wandern Änderungen sofort in base. */
+function loadSync() {
   try {
-    const v = JSON.parse(localStorage.getItem(KEY_PICKS));
-    if (Array.isArray(v)) return v.filter(ok);
-    // Stand vor der Picker-Zuteilung: die eine Pickliste übernehmen, ohne Zuteilung (sehen alle)
-    const old = JSON.parse(localStorage.getItem(KEY_PICK));
-    return ok(old) ? [{ id: newId(), fuer: '', ...old }] : [];
-  } catch { return []; }
+    const v = JSON.parse(localStorage.getItem(KEY_SYNC));
+    if (v && typeof v.base === 'object' && Array.isArray(v.pending)) return v;
+  } catch {}
+  // Stände von vor dem Abgleich übernehmen: als neue Listen, die beim nächsten Abgleich hochgeladen werden
+  const s = { base: {}, pending: [], seit: '' };
+  let old = [];
+  try { old = JSON.parse(localStorage.getItem(KEY_PICKS)); if (!Array.isArray(old)) old = []; } catch {}
+  try { const one = JSON.parse(localStorage.getItem(KEY_PICK)); if (!old.length && one) old = [{ fuer: '', ...one }]; } catch {}
+  for (const p of old.filter(p => p && typeof p === 'object' && Array.isArray(p.lines))) {
+    const doc = withLineIds({ ...p, id: p.id || newId(), fuer: p.fuer || '' }, newId);
+    for (const l of doc.lines) { l.scans = l.scans || []; l.picked = l.picked || 0; }
+    s.pending.push({ id: doc.id, op: { t: 'neu', doc } });
+  }
+  return s;
 }
-function savePick() {
+function saveSync() {
   try {
-    localStorage.setItem(KEY_PICKS, JSON.stringify(picks));
-    localStorage.removeItem(KEY_PICK); // erst nach erfolgreichem Speichern im neuen Format
+    localStorage.setItem(KEY_SYNC, JSON.stringify(sync));
+    localStorage.removeItem(KEY_PICKS); localStorage.removeItem(KEY_PICK); // erst nach erfolgreichem Speichern im neuen Format
     return true;
   } catch { toast('Speichern fehlgeschlagen. Ist der Speicher voll?'); return false; }
+}
+function foldLocal() { // ohne Server: Änderungen sofort in den eigenen Stand übernehmen
+  for (const { id, op } of sync.pending) {
+    const b = sync.base[id], doc = applyOp(b && !b.geloescht ? b.doc : null, op);
+    if (doc) sync.base[id] = { doc, rev: (b?.rev || 0) + 1 }; else delete sync.base[id];
+  }
+  sync.pending = [];
+}
+function recompute() {
+  const docs = new Map();
+  for (const [id, b] of Object.entries(sync.base)) if (!b.geloescht) docs.set(id, b.doc);
+  for (const { id, op } of sync.pending) docs.set(id, applyOp(docs.get(id) ?? null, op));
+  picks = [...docs].filter(([, d]) => d).map(([id, d]) => ({ ...d, id }));
+  pick = picks.find(p => p.id === openId) || null;
+}
+// Jede Änderung an einer Pickliste läuft hier durch: merken, speichern, im Hintergrund zum Server schicken.
+function commit(id, op) {
+  const snap = JSON.stringify(sync);
+  sync.pending.push({ id, op });
+  if (!SYNC_ON) foldLocal();
+  if (!saveSync()) { sync = JSON.parse(snap); return false; }
+  recompute();
+  if (SYNC_ON) setTimeout(push, 0);
+  return true;
 }
 
 let toastT;
@@ -78,6 +123,120 @@ function loadScript(path) {
 }
 function withTimeout(promise, ms, msg) {
   return Promise.race([promise, new Promise((_, rej) => setTimeout(() => rej(new Error(msg)), ms))]);
+}
+
+/* ---------- Server (Supabase-RPCs aus supabase/setup.sql) ---------- */
+let lager = ''; try { lager = localStorage.getItem(KEY_LAGER) || ''; } catch {}
+let tlAuth = null; // { kuerzel, pw } nach Teamleiter-Anmeldung, nur im Arbeitsspeicher -- der Server prüft es bei jeder Änderung
+let syncErr = ''; // '' | 'offline' | 'zugang'
+async function rpc(fn, args) {
+  const headers = { apikey: SYNC.key, 'Content-Type': 'application/json' };
+  if (/^eyJ/.test(SYNC.key)) headers.Authorization = 'Bearer ' + SYNC.key; // älterer "anon"-Schlüssel (JWT)
+  const r = await withTimeout(fetch(`${SYNC.url}/rest/v1/rpc/${fn}`, { method: 'POST', headers, body: JSON.stringify(args), cache: 'no-store' }),
+    15000, 'Server antwortet nicht');
+  const body = await r.json().catch(() => null);
+  if (!r.ok) {
+    const m = String(body?.message || 'HTTP ' + r.status), kind = (m.match(/^lb_(zugang|teamleiter|daten)\b/) || [])[1] || 'server';
+    throw Object.assign(new Error(m.replace(/^lb_\w+: /, '')), { kind });
+  }
+  return body;
+}
+const tlArgs = () => ({ tl_kuerzel: tlAuth?.kuerzel ?? null, tl_pw: tlAuth?.pw ?? null });
+const fromRow = r => ({ doc: r.doc, rev: r.rev, geloescht: r.geloescht });
+function syncFailed(err) {
+  syncErr = err?.kind === 'zugang' ? 'zugang' : 'offline';
+  if (err?.kind === 'zugang') lagerUngueltig();
+  else if (err?.kind === 'server') console.warn(err);
+}
+
+// Eigene Änderungen hochladen. Konflikt (ein anderes Handy war schneller): der Server schickt seinen Stand,
+// die eigenen Operationen werden darauf neu angewendet und nochmal gesendet.
+let pushing = null;
+function push() {
+  if (!SYNC_ON || !lager) return Promise.resolve();
+  // .finally läuft immer asynchron, also nach der Zuweisung -- eine async-Funktion ohne await wäre sonst schon
+  // fertig, bevor "pushing" gesetzt ist, und würde für immer als "läuft noch" hängen bleiben
+  if (!pushing) pushing = pushNow().finally(() => { pushing = null; });
+  return pushing;
+}
+async function pushNow() {
+  let changed = false;
+  try {
+    for (let guard = 0; sync.pending.length && guard < 50; guard++) {
+      const id = sync.pending[0].id, batch = sync.pending.filter(p => p.id === id);
+      const b = sync.base[id];
+      let doc = b && !b.geloescht ? b.doc : null;
+      for (const { op } of batch) doc = applyOp(doc, op);
+      let res = null;
+      try {
+        if (doc) res = await rpc('lb_speichern', { lager, id, doc, basis: b?.rev || 0, ...tlArgs() });
+        else if (b && !b.geloescht) res = await rpc('lb_loeschen', { lager, id, ...tlArgs() });
+      } catch (err) {
+        if (err.kind !== 'teamleiter' && err.kind !== 'daten') throw err;
+        toast('Vom Server abgelehnt: ' + err.message); // nicht endlos wiederholen, Änderung verfällt
+        res = { ok: true };
+      }
+      if (res?.row) sync.base[id] = fromRow(res.row);
+      if (!res || res.ok) sync.pending = sync.pending.filter(p => !batch.includes(p));
+      saveSync(); changed = true;
+    }
+    syncErr = '';
+  } catch (err) { syncFailed(err); }
+  finally {
+    if (changed) { recompute(); renderPickSafe(); }
+    renderSyncState();
+  }
+}
+
+// Änderungen der anderen Handys holen: seit dem letzten Abgleich (Server gibt 2 Min. Überlappung dazu),
+// ohne "seit" alles -- dann fliegen auch Listen raus, die es auf dem Server nicht mehr gibt.
+async function pull(full) {
+  if (!SYNC_ON || !lager) return;
+  let rows;
+  try { rows = await rpc('lb_liste', { lager, seit: full || !sync.seit ? null : sync.seit }); }
+  catch (err) { syncFailed(err); renderSyncState(); return; }
+  syncErr = '';
+  const before = new Set(picks.map(p => p.id)), wasOpen = openId;
+  let changed = false;
+  if (full || !sync.seit) {
+    const ids = new Set(rows.map(r => r.id));
+    for (const id of Object.keys(sync.base)) if (!ids.has(id)) { delete sync.base[id]; changed = true; }
+  }
+  for (const r of rows) {
+    if (!sync.base[r.id] || r.rev > sync.base[r.id].rev) { sync.base[r.id] = fromRow(r); changed = true; }
+    if (!sync.seit || r.geaendert > sync.seit) sync.seit = r.geaendert;
+  }
+  saveSync();
+  if (changed) {
+    recompute();
+    if (wasOpen && !pick) { openId = null; toast('Diese Pickliste wurde vom Teamleiter verworfen.'); }
+    else if (pick && !sichtbar(pick)) { openId = null; toast(`Diese Pickliste wurde an ${pick.fuer} umgeteilt.`); pick = null; }
+    const neu = visiblePicks().filter(p => !before.has(p.id) && !pickDone(p) && role !== 'master');
+    if (neu.length && picker) toast(`Neue Pickliste für ${picker}: ${neu[0].name}`);
+    renderPickSafe();
+  }
+  renderSyncState();
+}
+async function syncNow(full) { await push(); await pull(full); }
+
+// alle 5 s in der Pickliste, sonst alle 30 s; nur mit sichtbarer App und angemeldetem Nutzer
+let lastSync = 0;
+setInterval(() => {
+  if (!SYNC_ON || !lager || !picker || document.visibilityState !== 'visible') return;
+  if (mode !== 'pick' && Date.now() - lastSync < 30000) return;
+  lastSync = Date.now(); syncNow(false);
+}, 5000);
+window.addEventListener('online', () => { if (picker) syncNow(false); });
+
+function renderSyncState() {
+  const el = $('syncState');
+  el.hidden = !SYNC_ON;
+  if (!SYNC_ON) return;
+  const n = sync.pending.length, warten = n === 1 ? '1 Änderung wartet' : `${n} Änderungen warten`;
+  el.className = 'sync-state' + (syncErr || n ? ' warn' : '');
+  el.textContent = syncErr === 'offline' ? `Offline – ${n ? warten + ' auf Netz' : 'zeigt den letzten Stand'}`
+    : syncErr === 'zugang' ? 'Lager-Code ungültig – bitte neu anmelden'
+    : n ? `Wird übertragen … (${warten})` : '✓ Mit allen Handys abgeglichen';
 }
 
 /* ---------- Liste ---------- */
@@ -132,7 +291,8 @@ function setMode(m) {
   $('pickView').hidden = m !== 'pick';
   $('exportBar').hidden = m !== 'scan';
   $('pickBar').hidden = true; // im Pickliste-Modus entscheidet renderPick
-  if (m === 'pick') renderPick(); else $('scan').hidden = false;
+  if (m === 'pick') renderPick();
+  else { $('scan').hidden = false; $('galBtn').hidden = $('manual').hidden = false; $('camText').textContent = 'Etikett fotografieren'; }
 }
 $('modeScan').onclick = () => setMode('scan');
 $('modePick').onclick = () => setMode('pick');
@@ -142,10 +302,11 @@ $('modePick').onclick = () => setMode('pick');
 // eigenen Listen. Alles liegt in localStorage dieses Handys -- Zuteilen und Abarbeiten klappt also nur auf
 // demselben (geteilten) Lagerhandy, nicht über mehrere Geräte hinweg.
 const pickDone = p => !!p.freigabe || p.lines.every(l => l.picked >= l.required);
-const visiblePicks = () => picks.filter(p => role === 'master' || !p.fuer || p.fuer === picker)
+const sichtbar = p => role === 'master' || !p.fuer || p.fuer === picker;
+const visiblePicks = () => picks.filter(sichtbar)
   .sort((a, b) => pickDone(a) - pickDone(b) || b.importedAt - a.importedAt); // offene zuerst, neueste oben
 function openPick(p) {
-  pick = p;
+  openId = p?.id ?? null; pick = p || null;
   renderPick();
   window.scrollTo({ top: 0 });
 }
@@ -179,12 +340,27 @@ function renderPickOverview() {
   $('pickFuerRow').hidden = !isMaster;
   if (isMaster && !$('pickFuer').options.length) fillPickerSelect($('pickFuer'), '', 'Picker auswählen …');
 }
+// Abgleich im Hintergrund: nicht neu zeichnen, während jemand in der Pickliste tippt (Eingabe wäre weg) --
+// dann erst, wenn das Feld verlassen wird.
+let renderLater = false;
+function renderPickSafe() {
+  if (mode !== 'pick') return;
+  const a = document.activeElement;
+  if (a && $('pickView').contains(a) && /^(INPUT|SELECT)$/.test(a.tagName)) { renderLater = true; return; }
+  renderPick();
+}
+$('pickView').addEventListener('focusout', () => { if (renderLater) { renderLater = false; setTimeout(renderPickSafe, 0); } });
 function renderPick() {
-  if (pick && !picks.includes(pick)) pick = null; // z. B. verworfen
+  if (pick && (!picks.includes(pick) || !sichtbar(pick))) { pick = null; openId = null; } // verworfen oder umgeteilt
+  renderSyncState();
   $('pickOverview').hidden = !!pick;
   $('pickBody').hidden = !pick;
-  $('scan').hidden = !pick; // ohne geöffnete Liste gibt es nichts zu buchen -- sonst landet die Seite im Etikett-Leser
+  // ohne geöffnete Liste gibt es nichts zu buchen (sonst landet die Seite im Etikett-Leser); bei offenem Formular sowieso zu
+  $('scan').hidden = !pick || !$('form').hidden;
   $('pickBar').hidden = mode !== 'pick' || role !== 'master' || !pick;
+  // Picker scannen jedes Gebinde mit der Kamera: kein "Manuell erfassen", keine Galerie (dasselbe Foto nochmal)
+  $('galBtn').hidden = $('manual').hidden = role !== 'master';
+  $('camText').textContent = 'Gebinde scannen';
   if (!pick) { renderPickOverview(); return; }
   const total = pick.lines.length;
   const done = pick.lines.filter(l => l.picked >= l.required).length;
@@ -218,7 +394,11 @@ function renderPick() {
     const geb = gebindeCount(l.required, l.gebinde);
     prog.textContent = (l.charge ? `Charge ${l.charge} · ` : '') + `${fmtN(l.picked)} / ${fmtN(l.required)} ${l.einheit}` +
       (geb ? ` · ≈ ${fmtN(geb)} Gebinde à ${fmtN(l.gebinde)} ${l.einheit}` : '');
-    li.append(head, prog);
+    const nScan = l.scans.filter(x => !x.manuell).length, nHand = l.scans.length - nScan;
+    const count = document.createElement('div'); count.className = 'sub pick-count';
+    count.textContent = (geb ? `Gebinde gescannt: ${nScan} von ${fmtN(geb)}` : `Gebinde gescannt: ${nScan}`) +
+      (nHand ? ` · ${nHand}× von Hand (Teamleiter)` : '');
+    li.append(head, prog, count);
     if (l.hinweis) { const n = document.createElement('div'); n.className = 'sub pick-note'; n.textContent = l.hinweis; li.append(n); }
     if (!isDone && l.skipped) { const s = document.createElement('div'); s.className = 'sub pick-skip'; s.textContent = `Übersprungen von ${l.skipped.von || '–'}`; li.append(s); }
 
@@ -251,8 +431,8 @@ function renderPick() {
     gebInput.setAttribute('aria-label', `Gebindegröße für ${l.artikel}`);
     gebInput.onchange = () => {
       const v = parseFloat(gebInput.value.trim().replace(',', '.'));
-      l.gebinde = v > 0 ? v : undefined;
-      savePick(); renderPick();
+      commit(pick.id, { t: 'feld', lid: l.lid, key: 'gebinde', v: v > 0 ? v : null });
+      renderPick();
     };
     gebRow.append(gebInput, ' ' + l.einheit + ' pro Gebinde');
     li.append(gebRow);
@@ -279,8 +459,7 @@ function pickNeedsFreigabe() {
 }
 function skipPick(l, i) {
   if (!confirm(`Position ${i + 1} (${l.artikel}${l.charge ? ' · Charge ' + l.charge : ''}) überspringen? Am Ende muss ein Teamleiter die fehlende Ware freigeben.`)) return;
-  l.skipped = { von: picker, ts: Date.now() };
-  if (!savePick()) { delete l.skipped; return; }
+  commit(pick.id, { t: 'skip', lid: l.lid, skipped: { von: picker, ts: Date.now() } });
   renderPick();
 }
 function setPickField(l, key, raw) {
@@ -294,9 +473,7 @@ function setPickField(l, key, raw) {
     v = parseFloat(v.replace(',', '.'));
     if (!(v > 0)) { toast('Bitte eine Menge größer 0 eintragen.'); renderPick(); return; }
   }
-  const before = l[key];
-  l[key] = v;
-  if (!savePick()) l[key] = before;
+  commit(pick.id, { t: 'feld', lid: l.lid, key, v });
   renderPick();
 }
 $('pickApprove').onclick = () => {
@@ -304,8 +481,7 @@ $('pickApprove').onclick = () => {
   const open = pick.lines.filter(l => l.picked < l.required);
   if (!confirm(`Pickliste freigeben, obwohl ${open.length === 1 ? '1 Position fehlt' : open.length + ' Positionen fehlen'}?\n` +
     open.map(l => `${l.artikel}${l.charge ? ' · Charge ' + l.charge : ''}: ${fmtN(l.picked)} / ${fmtN(l.required)} ${l.einheit}`).join('\n'))) return;
-  pick.freigabe = { von: picker, ts: Date.now() };
-  if (!savePick()) { delete pick.freigabe; return; }
+  commit(pick.id, { t: 'freigabe', freigabe: { von: picker, ts: Date.now() } });
   renderPick();
 };
 function addPick(e) {
@@ -322,28 +498,42 @@ function addPick(e) {
     if (!confirm(`Falsche Charge? Erwartet ${line.charge}, erfasst ${e.charge || '–'}. Trotzdem buchen?`)) return;
   }
   if (line.einheit !== e.einheit) { toast(`Falsche Einheit: für diesen Artikel wird ${line.einheit} erwartet.`); return; }
+  // Gebinde-Pflicht: Picker buchen jedes Gebinde einzeln per Etikett-Scan (Artikel-Barcode muss erkannt sein).
+  // Von Hand bucht nur der Teamleiter, als Notfall bei unlesbarem Etikett -- das bleibt an der Buchung sichtbar.
+  const scanned = formScan, manuell = !scanned?.code;
+  if (role !== 'master') {
+    if (!scanned) { toast('In der Pickliste wird jedes Gebinde gescannt: bitte das Etikett fotografieren.'); return; }
+    if (!scanned.code) { toast('Artikel-Barcode nicht erkannt. Bitte das Etikett nochmal scharf fotografieren – ohne Barcode bucht nur der Teamleiter von Hand.'); return; }
+    if (line.gebinde && e.menge > line.gebinde + 0.001) {
+      toast(`Ein Scan ist ein Gebinde: höchstens ${fmtN(line.gebinde)} ${line.einheit}. Weitere Gebinde einzeln scannen.`); return;
+    }
+  }
+  if (scanned && picks.some(p => p.lines.some(l => l.scans.some(x => x.fp === scanned.fp)))) {
+    toast('Dieses Foto wurde schon gebucht. Jedes Gebinde einzeln fotografieren.'); return;
+  }
   // Gebindegröße bekannt (aus Liste oder von Hand eingetragen) und Menge weicht ab -> vermutlich falsches/angebrochenes
   // Gebinde erwischt oder vertippt, lieber einmal nachfragen statt stillschweigend falsch buchen
   if (line.gebinde && Math.abs(e.menge - line.gebinde) > 0.001 &&
       !confirm(`Falsche Menge? Ein Gebinde hat laut Liste ${fmtN(line.gebinde)} ${line.einheit}, erfasst wurden ${fmtN(e.menge)} ${e.einheit}. Trotzdem buchen?`)) return;
-  const before = line.picked;
-  line.picked += e.menge;
-  line.scans.push({ ts: e.ts, menge: e.menge, charge: e.charge, picker: e.picker });
-  if (!savePick()) { line.picked = before; line.scans.pop(); return; }
+  const scan = { ts: e.ts, menge: e.menge, charge: e.charge, picker: e.picker, ...(scanned ? { fp: scanned.fp } : {}), ...(manuell ? { manuell: true } : {}) };
+  if (!commit(pick.id, { t: 'scan', lid: line.lid, scan })) return;
+  // Gebindegröße noch unbekannt: das erste gescannte Gebinde legt sie fest, ab dann gilt "ein Scan = ein Gebinde"
+  if (!line.gebinde && !manuell) commit(pick.id, { t: 'feld', lid: line.lid, key: 'gebinde', v: e.menge });
+  const l = pick.lines.find(x => x.lid === line.lid);
   renderPick(); closeForm();
-  toast(line.picked >= line.required
-    ? `Fertig: ${e.artikel} (${fmtN(line.picked)}/${fmtN(line.required)} ${line.einheit})`
-    : `Gebucht: ${fmtN(e.menge)} ${e.einheit} für ${e.artikel} (${fmtN(line.picked)}/${fmtN(line.required)})`);
+  toast(l.picked >= l.required
+    ? `Fertig: ${e.artikel} (${fmtN(l.picked)}/${fmtN(l.required)} ${l.einheit})`
+    : `Gebucht: ${fmtN(e.menge)} ${e.einheit} für ${e.artikel} (${fmtN(l.picked)}/${fmtN(l.required)})`);
 }
-// target: { replace: Pickliste } = deren Positionen ersetzen (Zuteilung bleibt), { fuer: Kürzel } = neue Liste
+// target: { replaceId } = Positionen dieser Liste ersetzen (Zuteilung bleibt), sonst neue Liste für target.fuer
 function applyParsedPicklist({ title, von, nach, lines, skipped }, sourceName, target, hinweis) {
-  const data = { name: title ? `${title} · ${sourceName}` : sourceName, von, nach, importedAt: Date.now(), lines };
-  const before = JSON.stringify(picks), wasOpen = pick?.id;
-  let p = target.replace;
-  if (p && picks.includes(p)) { Object.assign(p, data); delete p.freigabe; }
-  else { p = { id: newId(), fuer: target.fuer || p?.fuer || '', geladenVon: picker, ...data }; picks.push(p); } // p: während der Texterkennung verworfen
-  if (!savePick()) { picks = JSON.parse(before); pick = picks.find(x => x.id === wasOpen) || null; renderPick(); return; }
-  if (!target.replace) $('pickFuer').value = ''; // nächste Liste bewusst neu zuteilen statt aus Versehen demselben Picker
+  const data = withLineIds({ name: title ? `${title} · ${sourceName}` : sourceName, von, nach, importedAt: Date.now(), lines }, newId);
+  // Liste während der Texterkennung verworfen: dann eben neu anlegen, mit derselben Zuteilung
+  const replace = target.replaceId && picks.some(p => p.id === target.replaceId);
+  const id = replace ? target.replaceId : newId();
+  if (!commit(id, replace ? { t: 'ersetzen', data } : { t: 'neu', doc: { id, fuer: target.fuer || '', geladenVon: picker, ...data } })) return;
+  if (!replace) $('pickFuer').value = ''; // nächste Liste bewusst neu zuteilen statt aus Versehen demselben Picker
+  const p = picks.find(x => x.id === id);
   openPick(p);
   toast(`Pickliste geladen: ${lines.length} Artikel` + (role === 'master' && p.fuer ? ` für ${p.fuer}.` : '.') + (skipped ? ` ${skipped} Zeile(n) ohne Menge übersprungen.` : '') + (hinweis || ''));
 }
@@ -420,8 +610,7 @@ function deskew(c) {
 // Lagerplatz: von Excel-Titel vorbelegt ("Pickliste B4 -> Bühl"), hier jederzeit nachtragbar/korrigierbar
 function savePickRoute() {
   if (!pick) return;
-  pick.von = $('pickVon').value.trim(); pick.nach = $('pickNach').value.trim();
-  savePick();
+  commit(pick.id, { t: 'route', von: $('pickVon').value.trim(), nach: $('pickNach').value.trim() });
 }
 $('pickVon').addEventListener('change', savePickRoute);
 $('pickNach').addEventListener('change', savePickRoute);
@@ -437,9 +626,9 @@ function newPickTarget() {
 }
 function choose(input, target) { if (target) { pickTarget = target; $(input).click(); } }
 $('pickChoose').onclick = () => choose('pickFile', newPickTarget());
-$('pickReplace').onclick = () => choose('pickFile', pick && { replace: pick });
+$('pickReplace').onclick = () => choose('pickFile', pick && { replaceId: pick.id, fuer: pick.fuer });
 $('pickPhotoChoose').onclick = () => choose('pickCam', newPickTarget());
-$('pickPhotoReplace').onclick = () => choose('pickCam', pick && { replace: pick });
+$('pickPhotoReplace').onclick = () => choose('pickCam', pick && { replaceId: pick.id, fuer: pick.fuer });
 $('pickGalBtn').onclick = ev => { // <label> öffnet die Galerie selbst -- nur ohne Picker-Auswahl abfangen
   if (ev.target === $('pickGal')) return;
   const t = newPickTarget();
@@ -450,32 +639,33 @@ $('pickFile').onchange = ev => { const f = ev.target.files[0]; ev.target.value =
 $('pickCam').onchange = $('pickGal').onchange = ev => { const f = ev.target.files[0]; ev.target.value = ''; if (pickTarget) loadPicklistPhoto(f, pickTarget); };
 $('pickFuerEdit').onchange = () => {
   if (role !== 'master' || !pick) return;
-  const before = pick.fuer;
-  pick.fuer = $('pickFuerEdit').value;
-  if (!savePick()) pick.fuer = before; else toast(`Pickliste ist jetzt ${pick.fuer} zugeteilt.`);
+  const fuer = $('pickFuerEdit').value;
+  if (commit(pick.id, { t: 'fuer', fuer })) toast(`Pickliste ist jetzt ${fuer} zugeteilt.`);
   renderPick();
 };
-$('pickBack').onclick = () => { pick = null; renderPick(); };
+$('pickBack').onclick = () => openPick(null);
 $('pickClear').onclick = () => {
   if (role !== 'master') { toast('Nur CMue oder MD können die Pickliste verwerfen.'); return; }
   if (!pick || !confirm('Pickliste verwerfen? Der Fortschritt geht verloren.')) return;
-  const i = picks.indexOf(pick);
-  picks.splice(i, 1);
-  if (!savePick()) { picks.splice(i, 0, pick); return; }
-  pick = null;
-  renderPick();
+  if (commit(pick.id, { t: 'weg' })) openPick(null);
 };
 
 /* ---------- Formular ---------- */
+// Herkunft des Formulars: Etikett-Foto (mit/ohne erkannten Artikel-Barcode, Fingerabdruck der Datei) oder von Hand
+let formScan = null;
 function showForm(r, file, idx = null) {
   editIdx = idx;
-  $('formSubmit').textContent = idx !== null ? 'Änderung speichern' : mode === 'pick' ? 'Für Pickliste buchen' : 'Zur Liste hinzufügen';
+  formScan = file ? { code: !!r.artikelCode, fp: `${file.name}|${file.size}|${file.lastModified}` } : null;
+  $('formSubmit').textContent = idx !== null ? 'Änderung speichern' : mode === 'pick' ? 'Gebinde buchen' : 'Zur Liste hinzufügen';
+  // Picker buchen in der Pickliste genau das, was der Barcode sagt -- nicht überschreibbar
+  const lock = !!file && idx === null && mode === 'pick' && role !== 'master';
   for (const f of FIELDS) {
     $(f).value = r[f] || '';
     const fromCode = (f === 'artikel' && r.artikelCode) || (f === 'charge' && r.chargeCode);
+    $(f).readOnly = !!(lock && fromCode);
     const t = $('t-' + f);
     t.className = file ? 'tag ' + (fromCode ? 'ok' : 'check') : 'tag';
-    t.textContent = file ? (fromCode ? 'aus Barcode' : 'bitte prüfen') : '';
+    t.textContent = file ? (fromCode ? (lock ? 'aus Barcode · fest' : 'aus Barcode') : 'bitte prüfen') : '';
   }
   formHasPhoto = !!file; formLabelColor = file ? r.labelColor || null : null;
   renderLabelCheck();
@@ -760,36 +950,74 @@ $('ver').textContent = 'v' + APP_VERSION;
 if ('serviceWorker' in navigator && /^https?:$/.test(location.protocol)) navigator.serviceWorker.register('sw.js').catch(() => {});
 
 /* ---------- Zugang: wer nutzt das Handy gerade? ---------- */
-// Bei JEDEM Öffnen der App muss ein Kürzel gewählt werden -- gedacht für ein geteiltes Lagerhandy, das
-// reihum genutzt wird, nicht für ein privates Gerät mit dauerhaftem Login. Die zwei Teamleiter-Kürzel
-// brauchen zusätzlich ein Passwort (Kürzel + "4567"); das schaltet die Pickliste-Verwaltung frei
-// (Excel/Foto laden, ersetzen, verwerfen). Picker ohne Passwort können weiter scannen/picken/exportieren.
-// Das läuft komplett im Browser -- kein Server, kein Schutz gegen jemanden, der den Quelltext liest oder
-// localStorage im Gerät ausliest. Für echte Zugriffskontrolle bräuchte es ein Backend.
+// Bei JEDEM Öffnen der App muss ein Kürzel gewählt werden -- gedacht für Lagerhandys, die reihum genutzt
+// werden, nicht für ein privates Gerät mit dauerhaftem Login. Die Teamleiter-Kürzel brauchen zusätzlich ein
+// Passwort; das schaltet die Pickliste-Verwaltung frei (laden, zuteilen, freigeben, verwerfen).
+// Mit Server (SYNC): Das Handy wird einmal mit dem Lager-Code eingerichtet, Teamleiter-Passwörter prüft der
+// Server, und er lehnt Umteilen/Freigeben/Verwerfen ohne gültiges Teamleiter-Passwort ab.
+// Ohne Server: alles nur im Browser (Passwort Kürzel + "4567"), kein Schutz gegen jemanden, der den Quelltext liest.
 const PICKERS = ['AA', 'DR', 'SB']; // weitere Kürzel folgen
-const MASTERS = ['CMue', 'MD']; // Passwort je Kürzel: Kürzel + "4567"
+const MASTERS = ['CMue', 'MD']; // mit Server: Passwort in supabase/zugang.sql, sonst Kürzel + "4567"
 const LOCK_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>';
 
+function showGate() {
+  const einrichten = SYNC_ON && !lager;
+  $('lagerForm').hidden = !einrichten;
+  $('gateWho').hidden = einrichten;
+  $('gate').hidden = false;
+  if (einrichten) setTimeout(() => $('lagerCode').focus(), 50);
+}
+function lagerUngueltig() {
+  if (!lager) return;
+  lager = ''; tlAuth = null;
+  try { localStorage.removeItem(KEY_LAGER); } catch {}
+  toast('Der Lager-Code gilt nicht mehr. Bitte neu eingeben.');
+  showGate();
+}
+$('lagerForm').onsubmit = async ev => {
+  ev.preventDefault();
+  const code = $('lagerCode').value.trim();
+  if (!code) return;
+  $('lagerBtn').disabled = true;
+  try {
+    if (!(await rpc('lb_pruefen', { lager: code }))) { toast('Lager-Code falsch.'); return; }
+    lager = code; $('lagerCode').value = '';
+    try { localStorage.setItem(KEY_LAGER, code); } catch {}
+    showGate();
+  } catch { toast('Zum Einrichten braucht das Handy einmal Netz.'); }
+  finally { $('lagerBtn').disabled = false; }
+};
+
+// Picker mit zugeteilter offener Pickliste landen direkt dort (bei genau einer gleich in der Liste)
+function landen() {
+  const open = role === 'master' ? [] : visiblePicks().filter(p => !pickDone(p));
+  if (!open.length) return false;
+  setMode('pick');
+  if (open.length === 1) openPick(open[0]);
+  toast(open.length === 1 ? `Pickliste für ${picker}: ${open[0].name}` : `${open.length} Picklisten für ${picker}`);
+  return true;
+}
 function login(code, r) {
   picker = code; role = r;
+  if (r !== 'master') tlAuth = null;
   $('gate').hidden = true;
   if (!$('form').hidden) closeForm(); // halb erfasstes Etikett gehört dem vorherigen Nutzer
-  pick = null;
+  openId = null; pick = null;
   renderPicker(); applyRoleUI();
-  // Picker mit zugeteilter offener Pickliste landen direkt dort (bei genau einer gleich in der Liste)
-  const open = r === 'master' ? [] : visiblePicks().filter(p => !pickDone(p));
-  if (open.length) {
-    setMode('pick');
-    if (open.length === 1) openPick(open[0]);
-    toast(open.length === 1 ? `Pickliste für ${code}: ${open[0].name}` : `${open.length} Picklisten für ${code}`);
-  }
+  const gelandet = landen();
+  // frisch vom Server holen; war lokal noch nichts da, danach nochmal schauen
+  if (SYNC_ON && lager) syncNow(true).then(() => { if (!gelandet && picker === code && !pick) landen(); });
 }
-function loginMaster(code) {
-  for (let i = 0; i < 3; i++) {
-    const pw = prompt(`Passwort für ${code}:`);
-    if (pw === null) return; // abgebrochen, Gate bleibt offen
-    if (pw === code + '4567') { login(code, 'master'); return; }
-    toast('Falsches Passwort.');
+async function loginMaster(code) {
+  const pw = prompt(`Passwort für ${code}:`);
+  if (pw === null) return; // abgebrochen, Gate bleibt offen
+  if (!SYNC_ON) { if (pw === code + '4567') login(code, 'master'); else toast('Falsches Passwort.'); return; }
+  try {
+    if (!(await rpc('lb_teamleiter', { lager, kuerzel: code, pw }))) { toast('Falsches Passwort.'); return; }
+    tlAuth = { kuerzel: code, pw };
+    login(code, 'master');
+  } catch (err) {
+    if (err.kind === 'zugang') lagerUngueltig(); else toast('Die Teamleiter-Anmeldung braucht Netz. Bitte gleich nochmal versuchen.');
   }
 }
 function buildGate() {
@@ -808,7 +1036,7 @@ function renderPicker() {
   $('pickerBtn').textContent = picker;
   $('pickerBtn').classList.toggle('is-master', role === 'master');
 }
-$('pickerBtn').onclick = () => { $('gate').hidden = false; }; // Gerät an jemand anderen weitergeben
+$('pickerBtn').onclick = showGate; // Gerät an jemand anderen weitergeben
 // Master-only: Pickliste per EXCEL laden/ersetzen, und verwerfen. Per FOTO laden/ersetzen ist für alle offen
 // (die gedruckte Liste landet oft direkt beim Picker). Scannen/Picken/Export bleiben ohnehin für alle offen.
 function applyRoleUI() {
@@ -818,6 +1046,9 @@ function applyRoleUI() {
   if (mode === 'pick') renderPick(); // Charge-Felder/Freigabe-Knopf/Picker-Auswahl/untere Leiste hängen an der Rolle
 }
 buildGate();
+if (!SYNC_ON) { foldLocal(); if (Object.keys(sync.base).length) saveSync(); } // Altbestand ohne Server gleich übernehmen
+recompute();
+showGate();
 if (window.__testLogin) login(window.__testLogin.code, window.__testLogin.role); // nur für die Testsuite, siehe fixtures.mjs
 
 $('modeSwitch').hidden = !PICK_ENABLED;
