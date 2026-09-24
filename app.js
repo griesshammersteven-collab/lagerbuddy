@@ -2,7 +2,7 @@
 /* LagerBuddy: Etikett fotografieren -> Barcodes + Text lokal auf dem Handy lesen -> Liste -> Excel.
    Alle Bibliotheken liegen in vendor/, kein Foto verlässt das Gerät. Nur Picklisten (Positionen, Zuteilung,
    Buchungen) werden über Supabase zwischen den Handys abgeglichen, wenn SYNC unten eingerichtet ist. */
-const APP_VERSION = '2026-09-24.6'; // bei JEDER Veröffentlichung erhöhen, genauso wie ?v= in index.html
+const APP_VERSION = '2026-09-24.7'; // bei JEDER Veröffentlichung erhöhen, genauso wie ?v= in index.html
 // Alte index.html (CDN/Offline-Speicher) mit neuerem app.js-Inhalt: dann fehlen Knöpfe und der Start bricht ab.
 // Einmal frisch laden (eindeutige URL geht am CDN vorbei), bevor irgendetwas verdrahtet wird.
 {
@@ -572,15 +572,32 @@ async function loadPicklistPhoto(file, target) {
     const img = ctx.getImageData(0, 0, canvas.width, canvas.height);
     img.data.set(stripTableLines(img.data, canvas.width, canvas.height));
     ctx.putImageData(img, 0, 0);
+    // Blatt quer oder kopfüber fotografiert: Tesseract richtet nur leichte Schräglagen aus, keine 90°/180°.
+    // Die Schriftrichtung verrät, ob das Blatt quer liegt; welche der zwei Drehungen stimmt, entscheidet die
+    // Texterkennung selbst (die richtige ergibt eine Pickliste). Höchstens zwei Durchläufe.
+    // Viertel im Uhrzeigersinn: quer -> erst 270° (Kopf zeigt meist nach rechts), dann 90°; sonst 0°, dann 180°.
+    const versuche = verticalTextScore(img.data, canvas.width, canvas.height) > 0.8 ? [3, 1] : [0, 2];
     const worker = await getTessWorker();
     // PSM 11 = verstreute Textstücke statt Seitenlayout: eine Tabelle ist kein Fließtext
     await worker.setParameters({ tessedit_pageseg_mode: '11' });
-    let r;
-    try { r = await withTimeout(worker.recognize(canvas, { rotateAuto: true }), 120000, 'Texterkennung hat zu lange gedauert'); }
-    finally { await worker.setParameters({ tessedit_pageseg_mode: '3' }); } // Etiketten lesen weiter mit Seitenlayout
-    const grid = picklistGridFromWords(r.data.lines, canvas.width);
-    if (!grid.length) throw pickErr('Keine Pickliste im Foto erkannt. Bitte die ganze Tabelle gerade von oben und bei gutem Licht fotografieren.');
-    applyParsedPicklist(parsePicklist(grid, grid), file.name, target,
+    // Erfolg = eine gültige Pickliste kommt heraus, nicht nur irgendein Raster: in falscher Lage liest Tesseract
+    // Kauderwelsch, das zufällig nach Tabelle aussehen kann (Test kopfüber)
+    let parsed = null, fehler = null;
+    try {
+      for (const q of versuche) {
+        if (q) setBusy(true, q === 2 ? 'Pickliste steht kopf – wird gedreht …' : 'Pickliste liegt quer – wird gedreht …');
+        const cv = q ? rotateQuarter(canvas, q) : canvas;
+        try {
+          const r = await withTimeout(worker.recognize(cv, { rotateAuto: true }), 120000, 'Texterkennung hat zu lange gedauert');
+          const grid = picklistGridFromWords(r.data.lines, cv.width);
+          if (grid.length) parsed = parsePicklist(grid, grid);
+        } catch (err) { if (!err?.userMessage) throw err; fehler = err; } // erwartbar (keine Menge-Spalte …): nächste Lage
+        finally { if (cv !== canvas) cv.width = cv.height = 0; }
+        if (parsed) break;
+      }
+    } finally { await worker.setParameters({ tessedit_pageseg_mode: '3' }); } // Etiketten lesen weiter mit Seitenlayout
+    if (!parsed) throw fehler || pickErr('Keine Pickliste im Foto erkannt. Bitte die ganze Tabelle scharf und bei gutem Licht fotografieren.');
+    applyParsedPicklist(parsed, file.name, target,
       ' Bitte die Zeilen unten prüfen – von einem Foto liest die App nicht so zuverlässig wie aus Excel.');
   } catch (err) {
     if (!err?.userMessage) console.error(err);
@@ -589,6 +606,15 @@ async function loadPicklistPhoto(file, target) {
     setBusy(false);
     if (canvas) { canvas.width = 0; canvas.height = 0; }
   }
+}
+// Bild um q Viertel im Uhrzeigersinn drehen (Blatt quer oder kopfüber fotografiert)
+function rotateQuarter(c, q) {
+  const out = document.createElement('canvas');
+  [out.width, out.height] = q % 2 ? [c.height, c.width] : [c.width, c.height];
+  const ctx = out.getContext('2d');
+  ctx.translate(out.width / 2, out.height / 2); ctx.rotate(q * Math.PI / 2);
+  ctx.drawImage(c, -c.width / 2, -c.height / 2);
+  return out;
 }
 // Schräg gehaltenes Handy: Blatt gerade drehen, sonst erkennt stripTableLines die Tabellenlinien nicht mehr
 // als Linien (Test: 5° schief -> Striche als "1" in Chargen/Artikelnummern). Winkel aus einem kleinen Vorschaubild.

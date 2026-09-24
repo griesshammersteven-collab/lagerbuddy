@@ -56,6 +56,16 @@ test('Echtes Foto: Rauschen in der Kopfzeile setzt keine falsche Spaltengrenze',
     [['931000136000', '120ml.braunglas', '', 61000, 'Stück']]);
 });
 
+// Blatt quer fotografiert (24.09.2026), nach dem Drehen: viele leere Zeilen, darunter Fußzeile
+// "erstellt von: …" / "Version: 001/19.08" -- landete sonst als Charge und in der Bezeichnung
+const quer = require('./test/ocr-pickliste-quer.json');
+test('Echtes Foto quer: Fußzeile unter der Tabelle gehört nicht zur Position', () => {
+  const grid = picklistGridFromWords(quer.lines, quer.width);
+  const p = parsePicklist(grid, grid);
+  assert.deepStrictEqual(p.lines.map(l => [l.artikel, l.bez, l.charge, l.required, l.einheit]),
+    [['931000136000', '120ml.braunglas', '', 61000, 'Stück']]);
+});
+
 // Weit weg, 5° schief, starkes JPEG: "‘Charge" kam mit 32 % Sicherheit -- ohne diese Überschrift begann die
 // Charge-Spalte erst bei "/Lot" und die Chargen rutschten in die Artikelspalte
 const weit = require('./test/ocr-pickliste-weit.json');
