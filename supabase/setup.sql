@@ -26,10 +26,19 @@ create index if not exists lb_picks_geaendert on public.lb_picks (geaendert);
 alter table public.lb_picks enable row level security;
 revoke all on table public.lb_geheim, public.lb_picks from anon, authenticated;
 
--- intern: stimmt der Code für diesen Schlüssel?
+-- intern: Code vereinheitlichen -- nur Buchstaben und Ziffern, groß. Auf dem iPhone schreibt die Tastatur im Passwort-
+-- feld nach dem ersten Buchstaben klein weiter ("Gr9j-pqzh-98bg"), damit scheiterte die Teamleiter-Anmeldung.
+create or replace function public.lb_norm(pw text) returns text
+language sql immutable set search_path = public as $$
+  select upper(regexp_replace(coalesce(pw, ''), '[^0-9A-Za-z]', '', 'g'));
+$$;
+
+-- intern: stimmt der Code für diesen Schlüssel? Gespeichert ist der Hash des vereinheitlichten Codes (zugang.sql);
+-- der Vergleich mit der wörtlichen Eingabe bleibt für Codes, die vor der Vereinheitlichung gesetzt wurden.
 create or replace function public.lb_ok(k text, pw text) returns boolean
 language sql stable security definer set search_path = public, extensions as $$
-  select exists (select 1 from public.lb_geheim g where g.k = lb_ok.k and g.hash = crypt(coalesce(pw, ''), g.hash));
+  select exists (select 1 from public.lb_geheim g where g.k = lb_ok.k
+    and (g.hash = crypt(public.lb_norm(pw), g.hash) or g.hash = crypt(coalesce(pw, ''), g.hash)));
 $$;
 
 -- intern: ohne gültigen Lager-Code bricht jeder Aufruf ab
@@ -120,7 +129,7 @@ begin
   return jsonb_build_object('ok', true, 'row', to_jsonb(neu));
 end $$;
 
-revoke all on function public.lb_ok(text, text), public.lb_zugang(text), public.lb_ist_tl(text, text)
+revoke all on function public.lb_ok(text, text), public.lb_zugang(text), public.lb_ist_tl(text, text), public.lb_norm(text)
   from public, anon, authenticated;
 revoke all on function public.lb_pruefen(text), public.lb_teamleiter(text, text, text),
   public.lb_liste(text, timestamptz), public.lb_speichern(text, text, jsonb, integer, text, text),
