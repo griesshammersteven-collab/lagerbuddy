@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'sha256-SXlXvUiZi305wYwHsrjeZ6PMLlSWytHh3aEUS5psdjk='; img-src 'self' blob:; connect-src 'self' blob: data: https://*.supabase.co; worker-src 'self' blob:; manifest-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'sha256-kEMYfl8Qmiw5IyLyW6MjmUn1FqfmMQ99npMfyhRJhU8='; img-src 'self' blob:; connect-src 'self' blob: data: https://*.supabase.co; worker-src 'self' blob:; manifest-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'">
 <meta name="referrer" content="no-referrer">
 <meta name="theme-color" content="#0B4F82">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -102,6 +102,11 @@ h2{font-size:15px;color:var(--mute);font-weight:600;margin:24px 0 8px;text-trans
 .gate-lead{color:var(--mute);font-size:13px;font-weight:600;text-transform:uppercase;letter-spacing:.6px;margin:22px 0 8px}
 .gate-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(76px,1fr));gap:10px}
 .gate-master svg{width:16px;height:16px}
+.gate-master.active{border-color:var(--green);background:#22b84a33}
+.tl-form{margin-top:12px}
+.tl-form label{display:block;color:var(--mute);font-size:13px;margin-bottom:4px}
+.tl-form input{width:100%;min-height:48px;padding:10px 12px;border-radius:10px;border:1px solid var(--line);background:#041019;color:var(--text);font:inherit;font-size:17px;letter-spacing:.5px}
+.tl-err{color:var(--err);font-weight:600;font-size:14px;margin:8px 0 0}
 .pick-route{display:grid;grid-template-columns:1fr auto 1fr;gap:6px;align-items:center;margin:8px 0}
 .pick-route input{min-height:40px;padding:6px 10px;border-radius:8px;border:1px solid var(--line);background:#041019;color:var(--text);font:inherit;font-size:14px;width:100%}
 .pick-route span{color:var(--mute)}
@@ -116,7 +121,7 @@ h2{font-size:15px;color:var(--mute);font-weight:600;margin:24px 0 8px;text-trans
 .empty{color:var(--mute);text-align:center;padding:28px 12px}
 .bar{position:fixed;left:0;right:0;bottom:0;padding:12px 16px calc(12px + env(safe-area-inset-bottom));background:linear-gradient(transparent,var(--bg) 30%);display:grid;grid-template-columns:1fr auto;gap:10px}
 .bar .danger{width:auto}
-#toast{position:fixed;left:16px;right:16px;bottom:calc(84px + env(safe-area-inset-bottom));background:#12304a;border:1px solid var(--line);border-radius:12px;padding:12px 14px;text-align:center;transition:opacity .2s;opacity:0;pointer-events:none}
+#toast{position:fixed;z-index:60;left:16px;right:16px;bottom:calc(84px + env(safe-area-inset-bottom));background:#12304a;border:1px solid var(--line);border-radius:12px;padding:12px 14px;text-align:center;transition:opacity .2s;opacity:0;pointer-events:none}
 #toast.on{opacity:1}
 @media (min-width:640px){body{max-width:600px;margin:0 auto}header{margin:0 0 16px;border-radius:0 0 16px 16px}.bar{max-width:600px;margin:0 auto}}
 </style>
@@ -138,6 +143,16 @@ h2{font-size:15px;color:var(--mute);font-weight:600;margin:24px 0 8px;text-trans
       <div class="gate-grid" id="gatePickers"></div>
       <p class="gate-lead">Teamleiter</p>
       <div class="gate-grid" id="gateMasters"></div>
+      <form id="tlForm" class="tl-form" hidden autocomplete="on">
+        <label for="tlPw" id="tlLabel">Passwort</label>
+        <input id="tlUser" name="username" autocomplete="username" hidden>
+        <input id="tlPw" name="password" type="password" autocomplete="current-password" autocapitalize="characters" autocorrect="off" spellcheck="false" maxlength="100">
+        <p class="tl-err" id="tlErr" role="alert" hidden></p>
+        <div class="row">
+          <button class="btn" type="button" id="tlCancel">Abbrechen</button>
+          <button class="btn primary" type="submit" id="tlBtn">Anmelden</button>
+        </div>
+      </form>
     </div>
   </div>
 </div>
@@ -247,8 +262,8 @@ h2{font-size:15px;color:var(--mute);font-weight:600;margin:24px 0 8px;text-trans
 </div>
 <div id="toast" role="status" aria-live="polite"></div>
 
-<script src="parse.js?v=2026-09-24.8"></script>
-<script src="picks.js?v=2026-09-24.8"></script>
-<script src="app.js?v=2026-09-24.8"></script>
+<script src="parse.js?v=2026-09-24.9"></script>
+<script src="picks.js?v=2026-09-24.9"></script>
+<script src="app.js?v=2026-09-24.9"></script>
 </body>
 </html>

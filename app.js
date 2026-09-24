@@ -2,7 +2,7 @@
 /* LagerBuddy: Etikett fotografieren -> Barcodes + Text lokal auf dem Handy lesen -> Liste -> Excel.
    Alle Bibliotheken liegen in vendor/, kein Foto verlässt das Gerät. Nur Picklisten (Positionen, Zuteilung,
    Buchungen) werden über Supabase zwischen den Handys abgeglichen, wenn SYNC unten eingerichtet ist. */
-const APP_VERSION = '2026-09-24.8'; // bei JEDER Veröffentlichung erhöhen, genauso wie ?v= in index.html
+const APP_VERSION = '2026-09-24.9'; // bei JEDER Veröffentlichung erhöhen, genauso wie ?v= in index.html
 // Alte index.html (CDN/Offline-Speicher) mit neuerem app.js-Inhalt: dann fehlen Knöpfe und der Start bricht ab.
 // Einmal frisch laden (eindeutige URL geht am CDN vorbei), bevor irgendetwas verdrahtet wird.
 {
@@ -1075,6 +1075,7 @@ function showGate() {
   $('lagerForm').hidden = !einrichten;
   $('gateWho').hidden = einrichten;
   $('gate').hidden = false;
+  closeTlForm();
   if (einrichten) setTimeout(() => $('lagerCode').focus(), 50);
 }
 function lagerUngueltig() {
@@ -1118,18 +1119,41 @@ function login(code, r) {
   // frisch vom Server holen; war lokal noch nichts da, danach nochmal schauen
   if (SYNC_ON && lager) syncNow(true).then(() => { if (!gelandet && picker === code && !pick) landen(); });
 }
-async function loginMaster(code) {
-  const pw = prompt(`Passwort für ${code}:`);
-  if (pw === null) return; // abgebrochen, Gate bleibt offen
-  if (!SYNC_ON) { if (pw === code + '4567') login(code, 'master'); else toast('Falsches Passwort.'); return; }
+// Teamleiter-Passwort im eigenen Feld statt prompt(): Fehler sichtbar direkt darunter (ein Hinweis hinter dem
+// Anmeldebildschirm war unsichtbar, "es passiert nichts"), Großbuchstaben-Tastatur, und iOS kann das Passwort im
+// Schlüsselbund sichern und später selbst ausfüllen -- kein Abtippen/Kopieren mehr (beim Kopieren fehlte das letzte Zeichen).
+let tlCode = null;
+function loginMaster(code) {
+  tlCode = code;
+  for (const b of $('gateMasters').children) b.classList.toggle('active', b.textContent === code);
+  $('tlLabel').textContent = `Passwort für ${code}`;
+  $('tlUser').value = code;
+  $('tlPw').value = ''; $('tlErr').hidden = true;
+  $('tlForm').hidden = false;
+  setTimeout(() => $('tlPw').focus(), 50);
+}
+function closeTlForm() {
+  tlCode = null; $('tlForm').hidden = true; $('tlPw').value = '';
+  for (const b of $('gateMasters').children) b.classList.remove('active');
+}
+function tlFehler(msg) { $('tlErr').textContent = msg; $('tlErr').hidden = false; $('tlPw').select(); }
+$('tlCancel').onclick = closeTlForm;
+$('tlForm').onsubmit = async ev => {
+  ev.preventDefault();
+  const code = tlCode, pw = $('tlPw').value;
+  if (!code || !pw.trim()) return;
+  if (!SYNC_ON) { if (pw.trim() === code + '4567') { closeTlForm(); login(code, 'master'); } else tlFehler('Falsches Passwort.'); return; }
+  $('tlBtn').disabled = true;
   try {
-    if (!(await rpc('lb_teamleiter', { lager, kuerzel: code, pw }))) { toast('Falsches Passwort.'); return; }
+    if (!(await rpc('lb_teamleiter', { lager, kuerzel: code, pw }))) { tlFehler('Falsches Passwort. Groß-/Kleinschreibung und Bindestriche sind egal.'); return; }
     tlAuth = { kuerzel: code, pw };
+    closeTlForm();
     login(code, 'master');
   } catch (err) {
-    if (err.kind === 'zugang') lagerUngueltig(); else toast('Die Teamleiter-Anmeldung braucht Netz. Bitte gleich nochmal versuchen.');
-  }
-}
+    if (err.kind === 'zugang') { closeTlForm(); lagerUngueltig(); }
+    else tlFehler('Keine Verbindung zum Server. Die Teamleiter-Anmeldung braucht Netz.');
+  } finally { $('tlBtn').disabled = false; }
+};
 function buildGate() {
   const mk = (code, master) => {
     const b = document.createElement('button');
