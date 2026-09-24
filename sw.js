@@ -11,8 +11,9 @@ self.addEventListener('install', e => {
     .then(r => { if (!r.ok) throw new Error('Laden fehlgeschlagen: ' + u); return c.put(u, r); }))))
     .then(() => self.skipWaiting()));
 });
+// Nur eigene alte Stände löschen: unter github.io teilen sich alle Pages-Seiten des Kontos einen Cache-Speicher
 self.addEventListener('activate', e => {
-  e.waitUntil(caches.keys().then(ks => Promise.all(ks.filter(k => k !== CACHE).map(k => caches.delete(k)))).then(() => self.clients.claim()));
+  e.waitUntil(caches.keys().then(ks => Promise.all(ks.filter(k => k.startsWith('lagerbuddy-') && k !== CACHE).map(k => caches.delete(k)))).then(() => self.clients.claim()));
 });
 
 const put = (req, res) => { if (res && res.ok) { const copy = res.clone(); caches.open(CACHE).then(c => c.put(req, copy)); } return res; };

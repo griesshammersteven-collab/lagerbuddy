@@ -2,7 +2,7 @@
 /* LagerBuddy: Etikett fotografieren -> Barcodes + Text lokal auf dem Handy lesen -> Liste -> Excel.
    Alle Bibliotheken liegen in vendor/, kein Foto verlässt das Gerät. Nur Picklisten (Positionen, Zuteilung,
    Buchungen) werden über Supabase zwischen den Handys abgeglichen, wenn SYNC unten eingerichtet ist. */
-const APP_VERSION = '2026-09-24.13'; // bei JEDER Veröffentlichung erhöhen, genauso wie ?v= in index.html
+const APP_VERSION = '2026-09-24.14'; // bei JEDER Veröffentlichung erhöhen, genauso wie ?v= in index.html
 // Alte index.html (CDN/Offline-Speicher) mit neuerem app.js-Inhalt: dann fehlen Knöpfe und der Start bricht ab.
 // Einmal frisch laden (eindeutige URL geht am CDN vorbei), bevor irgendetwas verdrahtet wird.
 {
@@ -163,6 +163,7 @@ function push() {
   if (!pushing) pushing = pushNow().finally(() => { pushing = null; });
   return pushing;
 }
+const TL_OPS = ['fuer', 'freigabe', 'weg', 'ersetzen'];
 async function pushNow() {
   let changed = false;
   try {
@@ -177,10 +178,22 @@ async function pushNow() {
         else if (b && !b.geloescht) res = await rpc('lb_loeschen', { lager, id, ...tlArgs() });
       } catch (err) {
         if (err.kind !== 'teamleiter' && err.kind !== 'daten') throw err;
+        // Nur Teamleiter-Änderungen (umteilen, freigeben, verwerfen, neu einlesen) abgelehnt, weil inzwischen ein
+        // Picker angemeldet ist: genau die verwerfen, die Buchungen der Picker im selben Stapel aber behalten.
+        const tlOps = err.kind === 'teamleiter' ? batch.filter(p => TL_OPS.includes(p.op.t)) : [];
+        if (tlOps.length && tlOps.length < batch.length) {
+          sync.pending = sync.pending.filter(p => !tlOps.includes(p));
+          toast('Teamleiter-Änderung verworfen (nicht mehr als Teamleiter angemeldet). Buchungen werden übertragen.');
+          saveSync(); changed = true;
+          continue;
+        }
         toast('Vom Server abgelehnt: ' + err.message); // nicht endlos wiederholen, Änderung verfällt
         res = { ok: true };
       }
-      if (res?.row) sync.base[id] = fromRow(res.row);
+      // Kaputter Stand auf dem Server (am Server vorbei geschrieben): nicht übernehmen und nicht endlos neu versuchen
+      if (res?.row && !res.row.geloescht && !gueltig(res.row.doc)) { toast('Pickliste auf dem Server beschädigt – Änderung verworfen.'); res = { ok: true }; }
+      // Antwort kann nach einem parallelen Abgleich eintreffen, der schon Neueres geholt hat: nicht zurückdrehen
+      if (res?.row && res.row.rev >= (sync.base[id]?.rev || 0)) sync.base[id] = fromRow(res.row);
       if (!res || res.ok) sync.pending = sync.pending.filter(p => !batch.includes(p));
       saveSync(); changed = true;
     }
@@ -207,6 +220,7 @@ async function pull(full) {
     for (const id of Object.keys(sync.base)) if (!ids.has(id)) { delete sync.base[id]; changed = true; }
   }
   for (const r of rows) {
+    if (!r.geloescht && !gueltig(r.doc)) { console.warn('Pickliste übergangen, ungültig:', r.id); continue; } // legt sonst alle Handys lahm
     if (!sync.base[r.id] || r.rev > sync.base[r.id].rev) { sync.base[r.id] = fromRow(r); changed = true; }
     if (!sync.seit || r.geaendert > sync.seit) sync.seit = r.geaendert;
   }
@@ -337,7 +351,7 @@ function renderPickOverview() {
     sub.textContent = [p.fuer ? 'für ' + p.fuer : 'nicht zugeteilt', `${done} von ${p.lines.length} fertig`,
       new Date(p.importedAt).toLocaleString('de-DE', { dateStyle: 'short', timeStyle: 'short' })].join(' · ');
     b.append(head, sub);
-    b.onclick = () => openPick(p);
+    b.onclick = () => openPick(picks.find(x => x.id === p.id) || null); // nach einem Abgleich gibt es p neu
     li.append(b);
     return li;
   }));
@@ -440,8 +454,9 @@ function renderPick() {
     // steht sie einmal fest, ändert sie nur der Teamleiter -- sonst ließe sich "ein Scan = ein Gebinde" aushebeln
     gebInput.readOnly = !!l.gebinde && role !== 'master';
     gebInput.onchange = () => {
-      const v = parseFloat(gebInput.value.trim().replace(',', '.'));
+      const v = parseDe(gebInput.value);
       commit(pick.id, { t: 'feld', lid: l.lid, key: 'gebinde', v: v > 0 ? v : null });
+      if (v > 0) merken(l.artikel, v, l.einheit, true);
       renderPick();
     };
     gebRow.append(gebInput, ' ' + l.einheit + ' pro Gebinde');
@@ -480,7 +495,7 @@ function setPickField(l, key, raw) {
     if (!v) { toast('Die Artikelnummer darf nicht leer sein.'); renderPick(); return; }
   }
   if (key === 'required') {
-    v = parseFloat(v.replace(',', '.'));
+    v = parseDe(v);
     if (!(v > 0)) { toast('Bitte eine Menge größer 0 eintragen.'); renderPick(); return; }
   }
   commit(pick.id, { t: 'feld', lid: l.lid, key, v });
@@ -521,11 +536,15 @@ function addPick(e) {
   if (scanned && picks.some(p => p.lines.some(l => l.scans.some(x => x.fp === scanned.fp)))) {
     toast('Dieses Foto wurde schon gebucht. Jedes Gebinde einzeln fotografieren.'); return;
   }
+  // Gebindegröße: die der Position, sonst die gemerkte aus früheren Listen -- für die gelten dieselben Prüfungen
+  // (Anbruch-Rückfrage, Sammelbuchung nur mit vollen Gebinden), und wer sie für falsch hält, korrigiert sie an der Position.
+  const geb = line.gebinde || (formVorschlag?.einheit === line.einheit && formVorschlag.geb) || 0;
+  const korrigieren = line.gebinde ? '' : ' Stimmt die gemerkte Gebindegröße nicht, bei der Position unter „Gebindegröße“ korrigieren.';
   const anzahl = anzahlWert();
   if (anzahl > 1) {
     const offen = Math.round((line.required - line.picked) * 1000) / 1000;
-    if (line.gebinde && Math.abs(e.menge - line.gebinde) > 0.001) {
-      toast(`Mehrere Gebinde auf einmal nur mit vollen Gebinden (${fmtN(line.gebinde)} ${line.einheit}). Einen Anbruch einzeln scannen.`); return;
+    if (geb && Math.abs(e.menge - geb) > 0.001) {
+      toast(`Mehrere Gebinde auf einmal nur mit vollen Gebinden (${fmtN(geb)} ${line.einheit}). Einen Anbruch einzeln scannen.${korrigieren}`); return;
     }
     if (anzahl * e.menge > offen + 0.001) {
       toast(`Offen sind nur noch ${fmtN(offen)} ${line.einheit}: höchstens ${Math.floor((offen + 0.001) / e.menge)} Gebinde.`); return;
@@ -537,19 +556,21 @@ function addPick(e) {
   // Gebindegröße bekannt und Menge weicht ab -> Anbruch oder vertippt: einmal nachfragen statt stillschweigend buchen.
   // Nicht beim letzten Gebinde, wenn genau der vorgeschlagene Rest der Position gebucht wird.
   const rest = Math.round((line.required - line.picked) * 1000) / 1000;
-  const istRest = e.menge < line.gebinde && Math.abs(e.menge - rest) < 0.001;
-  if (line.gebinde && Math.abs(e.menge - line.gebinde) > 0.001 && !istRest &&
-      !confirm(e.menge < line.gebinde
-        ? `Anbruch buchen? Ein volles Gebinde hat ${fmtN(line.gebinde)} ${line.einheit}, gebucht werden ${fmtN(e.menge)} ${e.einheit}.`
-        : `Mehr als ein Gebinde? Ein Gebinde hat ${fmtN(line.gebinde)} ${line.einheit}, erfasst wurden ${fmtN(e.menge)} ${e.einheit}. Trotzdem buchen?`)) return;
+  // (nur mit Gebindegröße an der Position: eine bloß gemerkte könnte vertippt sein, dann lieber einmal nachfragen)
+  const istRest = !!line.gebinde && e.menge < geb && Math.abs(e.menge - rest) < 0.001;
+  if (geb && Math.abs(e.menge - geb) > 0.001 && !istRest &&
+      !confirm((e.menge < geb
+        ? `Anbruch buchen? Ein volles Gebinde hat ${fmtN(geb)} ${line.einheit}, gebucht werden ${fmtN(e.menge)} ${e.einheit}.`
+        : `Mehr als ein Gebinde? Ein Gebinde hat ${fmtN(geb)} ${line.einheit}, erfasst wurden ${fmtN(e.menge)} ${e.einheit}. Trotzdem buchen?`) +
+        (korrigieren ? '\n\n' + korrigieren.trim() : ''))) return;
   const scan = { ts: e.ts, menge: e.menge, charge: e.charge, picker: e.picker, ...(anzahl > 1 ? { anzahl } : {}),
     ...(scanned ? { fp: scanned.fp } : {}), ...(manuell ? { manuell: true } : {}) };
   if (!commit(pick.id, { t: 'scan', lid: line.lid, scan })) return;
   // Gebindegröße noch unbekannt: das erste gescannte Gebinde legt sie fest, ab dann gilt "ein Scan = ein Gebinde".
   // War eine Größe gemerkt (anderes Handy/andere Liste) und das erste Gebinde ist ein Anbruch, gilt die gemerkte.
-  const vollGeb = formVorschlag?.geb && e.menge <= formVorschlag.geb ? formVorschlag.geb : e.menge;
+  const vollGeb = geb && e.menge <= geb ? geb : e.menge;
   if (!line.gebinde && !manuell) commit(pick.id, { t: 'feld', lid: line.lid, key: 'gebinde', v: vollGeb });
-  if (!manuell) merken(line.artikel, line.gebinde || vollGeb, line.einheit);
+  if (!manuell) merken(line.artikel, line.gebinde || vollGeb, line.einheit, true); // an der Position festgelegt: gilt
   const l = pick.lines.find(x => x.lid === line.lid);
   renderPick(); closeForm();
   toast(l.picked >= l.required
@@ -726,10 +747,12 @@ function gemerkt(artikel, einheit) {
     .map(l => ({ menge: l.gebinde, einheit: l.einheit, ts: p.importedAt || 0 }))).sort((x, y) => y.ts - x.ts)[0];
   return aus || null;
 }
-// Nur volle Gebinde merken: ein Anbruch (weniger als die gemerkte Größe) überschreibt nichts
-function merken(artikel, menge, einheit) {
+// Nur volle Gebinde merken: ein Anbruch (weniger als die gemerkte Größe) überschreibt nichts. Außer die Größe ist an
+// einer Position festgelegt (fest = true, z. B. vom Teamleiter korrigiert): Sonst bliebe ein einmal vertipptes
+// "250 statt 25" für immer auf dem Handy gemerkt.
+function merken(artikel, menge, einheit, fest = false) {
   const a = normArt(artikel), alt = gebindeMem[a];
-  if (!a || !(menge > 0) || (alt && alt.einheit === einheit && menge < alt.menge - 0.001)) return;
+  if (!a || !(menge > 0) || (!fest && alt && alt.einheit === einheit && menge < alt.menge - 0.001)) return;
   gebindeMem[a] = { menge, einheit, ts: Date.now() };
   try { localStorage.setItem(KEY_GEBINDE, JSON.stringify(gebindeMem)); } catch {}
 }
@@ -751,18 +774,18 @@ function mengeVorschlag(artikel) {
   return m ? { menge: m.menge, einheit: m.einheit, geb: m.menge, quelle: 'gemerkt' } : null;
 }
 let formVorschlag = null, mengeVonHand = false;
-function fillMenge(r) {
+function fillMenge(r, einheitBehalten = false) {
   formVorschlag = mengeVorschlag(r.artikel);
   const v = formVorschlag;
   const menge = typeof r.menge === 'number' ? r.menge : v?.menge;
   $('menge').value = menge > 0 ? String(menge).replace('.', ',') : '';
   const einheit = r.einheit || v?.einheit;
-  for (const el of document.getElementsByName('einheit')) el.checked = el.value === einheit;
+  if (einheit || !einheitBehalten) for (const el of document.getElementsByName('einheit')) el.checked = el.value === einheit;
   mengeVonHand = false;
   renderMengeTag();
 }
 function renderMengeTag() {
-  const v = formVorschlag, t = $('t-menge'), m = parseFloat($('menge').value.trim().replace(',', '.'));
+  const v = formVorschlag, t = $('t-menge'), m = parseDe($('menge').value);
   let cls = '', txt = '';
   if (v?.geb && m > 0) {
     if (v.quelle === 'rest' && Math.abs(m - v.menge) < 0.001) { cls = 'check'; txt = 'Rest der Position'; }
@@ -774,14 +797,14 @@ function renderMengeTag() {
 }
 $('menge').addEventListener('input', () => { mengeVonHand = true; renderMengeTag(); });
 // Artikelnummer von Hand eingetippt/korrigiert: Vorschlag nachziehen, solange die Menge nicht selbst geändert wurde
-$('artikel').addEventListener('input', () => { if (!mengeVonHand && editIdx === null) fillMenge({ artikel: $('artikel').value }); });
+$('artikel').addEventListener('input', () => { if (!mengeVonHand && editIdx === null) fillMenge({ artikel: $('artikel').value }, true); });
 
 /* ---------- Mehrere gleiche Gebinde auf einmal (Sammelbuchung) ---------- */
 // Ein Gebinde wird gescannt (belegt Artikel und Charge per Barcode), weitere gleiche bestätigt der Picker mit der
 // Anzahl -- statt 14-mal zu scannen. Die Buchung trägt Picker und Uhrzeit: passt etwas nicht, ist klar, wer bestätigt hat.
 function anzahlWert() { const n = parseInt($('anzahl').value, 10); return n > 0 ? n : 1; }
 function anzahlMax() { // so viele volle Gebinde passen noch in die offene Menge der aktuellen Position
-  const l = currentPickLine(), m = parseFloat($('menge').value.trim().replace(',', '.'));
+  const l = currentPickLine(), m = parseDe($('menge').value);
   if (!l || !(m > 0) || normArt(l.artikel) !== normArt($('artikel').value)) return 0;
   return Math.floor((l.required - l.picked + 0.001) / m);
 }
@@ -849,7 +872,7 @@ $('form').onsubmit = ev => {
   const e = { ts: Date.now() };
   for (const f of FIELDS) e[f] = $(f).value.trim().replace(/\s+/g, ' ');
   if (!e.artikel) { toast('Bitte eine Artikelnummer eintragen.'); $('artikel').focus(); return; }
-  const menge = parseFloat($('menge').value.trim().replace(',', '.')); // deutsches Komma zulassen, type=number kennt nur den Punkt
+  const menge = parseDe($('menge').value); // deutsches Format ("12,5", "1.000"), type=number kennt nur den Punkt
   if (!(menge > 0)) { toast('Bitte die Menge pro Gebinde eintragen.'); $('menge').focus(); return; }
   const einheit = document.querySelector('input[name=einheit]:checked')?.value;
   if (!einheit) { toast('Bitte Stück oder kg auswählen.'); return; }
@@ -1100,11 +1123,11 @@ async function exportPick(p) {
       ['Exportiert', `${dt(Date.now())} von ${picker}`],
       [],
       ['Pos.', 'Artikelnummer', 'Bezeichnung', 'Charge', 'Menge soll', 'Menge gepickt', 'Differenz', 'Einheit', 'Gebindegröße',
-        'Gebinde gescannt', 'Gebinde per Sammelbuchung bestätigt', 'Gebinde von Hand', 'Status', 'Hinweis'],
+        'Gebinde gescannt', 'davon per Sammelbuchung bestätigt', 'Gebinde von Hand', 'Status', 'Hinweis'],
       ...p.lines.map((l, i) => {
         const auto = l.scans.filter(x => !x.manuell);
         return [i + 1, l.artikel, l.bez || '', l.charge || '', l.required, r3(l.picked), r3(l.picked - l.required), l.einheit, l.gebinde ?? '',
-          auto.length, auto.reduce((s, x) => s + (x.anzahl || 1) - 1, 0), l.scans.filter(x => x.manuell).reduce((s, x) => s + (x.anzahl || 1), 0),
+          auto.reduce((s, x) => s + (x.anzahl || 1), 0), auto.reduce((s, x) => s + (x.anzahl || 1) - 1, 0), l.scans.filter(x => x.manuell).reduce((s, x) => s + (x.anzahl || 1), 0),
           status(l), l.hinweis || ''];
       }),
     ];
@@ -1120,7 +1143,7 @@ async function exportPick(p) {
     // Dateiname nur ASCII: Umlaute machen Ärger in Windows-Freigaben, Mail-Anhängen und beim Download selbst
     const slug = t => t.replace(/->|→/g, ' ').replace(/[äöüÄÖÜß]/g, c => ({ ä: 'ae', ö: 'oe', ü: 'ue', Ä: 'Ae', Ö: 'Oe', Ü: 'Ue', ß: 'ss' })[c])
       .normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^A-Za-z0-9-]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 60);
-    await saveWorkbook(wb, `${slug(titel) || 'Pickliste'}${p.fuer ? '_' + p.fuer : ''}_${stamp()}.xlsx`);
+    await saveWorkbook(wb, `${slug(titel) || 'Pickliste'}${p.fuer && slug(p.fuer) ? '_' + slug(p.fuer) : ''}_${stamp()}.xlsx`);
   } catch (err) {
     console.error(err); toast('Export fehlgeschlagen. Bitte nochmal versuchen.');
   }
@@ -1214,8 +1237,9 @@ function landen() {
   toast(open.length === 1 ? `Pickliste für ${picker}: ${open[0].name}` : `${open.length} Picklisten für ${picker}`);
   return true;
 }
+let landenNachTour = false;
 function login(code, r) {
-  picker = code; role = r;
+  picker = code; role = r; landenNachTour = false;
   if (r !== 'master') tlAuth = null;
   $('gate').hidden = true;
   if (!$('form').hidden) closeForm(); // halb erfasstes Etikett gehört dem vorherigen Nutzer
@@ -1223,7 +1247,10 @@ function login(code, r) {
   renderPicker(); applyRoleUI();
   const gelandet = landen();
   // frisch vom Server holen; war lokal noch nichts da, danach nochmal schauen
-  if (SYNC_ON && lager) syncNow(true).then(() => { if (!gelandet && picker === code && !pick && !tourDemo.length) landen(); });
+  if (SYNC_ON && lager) syncNow(true).then(() => {
+    if (gelandet || picker !== code || pick) return;
+    if (tourDemo.length) landenNachTour = true; else landen(); // läuft der Rundgang gerade, danach (tour.js)
+  });
   if (typeof tourAuto === 'function') tourAuto(); // beim ersten Mal pro Kürzel und Handy: Rundgang (tour.js)
 }
 // Teamleiter-Passwort im eigenen Feld statt prompt(): Fehler sichtbar direkt darunter (ein Hinweis hinter dem
@@ -1252,7 +1279,9 @@ $('tlForm').onsubmit = async ev => {
   if (!SYNC_ON) { if (pw.trim() === code + '4567') { closeTlForm(); login(code, 'master'); } else tlFehler('Falsches Passwort.'); return; }
   $('tlBtn').disabled = true;
   try {
-    if (!(await rpc('lb_teamleiter', { lager, kuerzel: code, pw }))) { tlFehler('Falsches Passwort. Groß-/Kleinschreibung und Bindestriche sind egal.'); return; }
+    const ok = await rpc('lb_teamleiter', { lager, kuerzel: code, pw });
+    if (tlCode !== code || $('gate').hidden) return; // während der Prüfung abgebrochen oder ein Picker hat sich angemeldet
+    if (!ok) { tlFehler('Falsches Passwort. Groß-/Kleinschreibung und Bindestriche sind egal.'); return; }
     tlAuth = { kuerzel: code, pw };
     closeTlForm();
     login(code, 'master');

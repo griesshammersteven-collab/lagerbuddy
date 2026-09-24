@@ -50,4 +50,15 @@ function withLineIds(doc, newId) {
   return doc;
 }
 
-if (typeof module !== 'undefined') module.exports = { applyOp, withLineIds, cloneDoc };
+// Plausibilitätsprüfung für Picklisten vom Server: Eine kaputte Liste (Fehler auf einem anderen Handy oder bewusst
+// manipuliert) darf die App nicht auf allen Handys lahmlegen -- sie wird dann übergangen statt gespeichert.
+// Dieselben Regeln prüft der Server in lb_speichern (supabase/setup.sql).
+const istText = v => typeof v === 'string' && v.length <= 200;
+function gueltig(doc) {
+  if (!doc || typeof doc !== 'object' || Array.isArray(doc) || !Array.isArray(doc.lines) || doc.lines.length > 500) return false;
+  return doc.lines.every(l => l && typeof l === 'object' && istText(l.lid) && istText(l.artikel)
+    && Number.isFinite(l.required) && Number.isFinite(l.picked) && Array.isArray(l.scans) && l.scans.length <= 2000
+    && l.scans.every(s => s && typeof s === 'object' && Number.isFinite(s.menge)));
+}
+
+if (typeof module !== 'undefined') module.exports = { applyOp, withLineIds, cloneDoc, gueltig };
