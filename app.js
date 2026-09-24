@@ -2,7 +2,7 @@
 /* LagerBuddy: Etikett fotografieren -> Barcodes + Text lokal auf dem Handy lesen -> Liste -> Excel.
    Alle Bibliotheken liegen in vendor/, kein Foto verlässt das Gerät. Nur Picklisten (Positionen, Zuteilung,
    Buchungen) werden über Supabase zwischen den Handys abgeglichen, wenn SYNC unten eingerichtet ist. */
-const APP_VERSION = '2026-09-24.12'; // bei JEDER Veröffentlichung erhöhen, genauso wie ?v= in index.html
+const APP_VERSION = '2026-09-24.13'; // bei JEDER Veröffentlichung erhöhen, genauso wie ?v= in index.html
 // Alte index.html (CDN/Offline-Speicher) mit neuerem app.js-Inhalt: dann fehlen Knöpfe und der Start bricht ab.
 // Einmal frisch laden (eindeutige URL geht am CDN vorbei), bevor irgendetwas verdrahtet wird.
 {
@@ -38,6 +38,7 @@ let sync = loadSync();
 let picks = []; // aktueller Stand aller Picklisten = Serverstand + eigene, noch nicht übertragene Änderungen
 let openId = null; // id der geöffneten Pickliste, null = Übersicht
 let pick = null; // die geöffnete Pickliste aus picks (nach jedem recompute neu gesetzt)
+let tourDemo = []; // Beispiel-Picklisten, solange der Rundgang läuft (tour.js)
 let picker = '', role = ''; // erst nach der Auswahl am Zugangs-Gate gültig, siehe ganz unten
 let mode = 'scan'; // 'scan' (freie Liste) oder 'pick' (Pickliste)
 let busy = false;
@@ -94,10 +95,12 @@ function recompute() {
   for (const [id, b] of Object.entries(sync.base)) if (!b.geloescht) docs.set(id, b.doc);
   for (const { id, op } of sync.pending) docs.set(id, applyOp(docs.get(id) ?? null, op));
   picks = [...docs].filter(([, d]) => d).map(([id, d]) => ({ ...d, id }));
+  picks.push(...tourDemo); // Beispiel-Picklisten, nur während des Rundgangs (tour.js), nie gespeichert oder übertragen
   pick = picks.find(p => p.id === openId) || null;
 }
 // Jede Änderung an einer Pickliste läuft hier durch: merken, speichern, im Hintergrund zum Server schicken.
 function commit(id, op) {
+  if (tourDemo.some(p => p.id === id)) return false; // Beispiel-Liste des Rundgangs: nichts buchen
   const snap = JSON.stringify(sync);
   sync.pending.push({ id, op });
   if (!SYNC_ON) foldLocal();
@@ -223,7 +226,7 @@ async function syncNow(full) { await push(); await pull(full); }
 // alle 5 s in der Pickliste, sonst alle 30 s; nur mit sichtbarer App und angemeldetem Nutzer
 let lastSync = 0;
 setInterval(() => {
-  if (!SYNC_ON || !lager || !picker || document.visibilityState !== 'visible') return;
+  if (!SYNC_ON || !lager || !picker || document.visibilityState !== 'visible' || tourDemo.length) return;
   if (mode !== 'pick' && Date.now() - lastSync < 30000) return;
   lastSync = Date.now(); syncNow(false);
 }, 5000);
@@ -529,7 +532,7 @@ function addPick(e) {
     }
     const summe = Math.round(anzahl * e.menge * 1000) / 1000;
     if (!confirm(`${anzahl} gleiche Gebinde à ${fmtN(e.menge)} ${e.einheit} = ${fmtN(summe)} ${e.einheit} als gepickt bestätigen?\n\n` +
-      `Gebucht auf ${picker}. Mit OK bestätigst du, alle ${anzahl} Gebinde geprüft zu haben (Artikel, Charge, Menge).`)) return;
+      `Gebucht auf ${picker}. Mit OK bestätigen Sie, alle ${anzahl} Gebinde geprüft zu haben (Artikel, Charge, Menge).`)) return;
   }
   // Gebindegröße bekannt und Menge weicht ab -> Anbruch oder vertippt: einmal nachfragen statt stillschweigend buchen.
   // Nicht beim letzten Gebinde, wenn genau der vorgeschlagene Rest der Position gebucht wird.
@@ -1220,7 +1223,8 @@ function login(code, r) {
   renderPicker(); applyRoleUI();
   const gelandet = landen();
   // frisch vom Server holen; war lokal noch nichts da, danach nochmal schauen
-  if (SYNC_ON && lager) syncNow(true).then(() => { if (!gelandet && picker === code && !pick) landen(); });
+  if (SYNC_ON && lager) syncNow(true).then(() => { if (!gelandet && picker === code && !pick && !tourDemo.length) landen(); });
+  if (typeof tourAuto === 'function') tourAuto(); // beim ersten Mal pro Kürzel und Handy: Rundgang (tour.js)
 }
 // Teamleiter-Passwort im eigenen Feld statt prompt(): Fehler sichtbar direkt darunter (ein Hinweis hinter dem
 // Anmeldebildschirm war unsichtbar, "es passiert nichts"), Großbuchstaben-Tastatur, und iOS kann das Passwort im
