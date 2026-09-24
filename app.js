@@ -1118,7 +1118,7 @@ if ('serviceWorker' in navigator && /^https?:$/.test(location.protocol)) navigat
 // Mit Server (SYNC): Das Handy wird einmal mit dem Lager-Code eingerichtet, Teamleiter-Passwörter prüft der
 // Server, und er lehnt Umteilen/Freigeben/Verwerfen ohne gültiges Teamleiter-Passwort ab.
 // Ohne Server: alles nur im Browser (Passwort Kürzel + "4567"), kein Schutz gegen jemanden, der den Quelltext liest.
-const PICKERS = ['AA', 'DR', 'SB']; // weitere Kürzel folgen
+const PICKERS = ['AA', 'DR', 'SB', 'UB', 'RW']; // weitere Kürzel hier ergänzen
 const MASTERS = ['CMue', 'MD']; // mit Server: Passwort in supabase/zugang.sql, sonst Kürzel + "4567"
 const LOCK_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>';
 
