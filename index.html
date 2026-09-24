@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'sha256-I1U+JcJX13zl0fncf60IbYN6i4AxoEptweASgwYHtMc='; img-src 'self' blob:; connect-src 'self' blob: data: https://*.supabase.co; worker-src 'self' blob:; manifest-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'sha256-dEGI0/wOHvIUKVTUFRhm02yHjPU5XYeyGEwPQyknzII='; img-src 'self' blob:; connect-src 'self' blob: data: https://*.supabase.co; worker-src 'self' blob:; manifest-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'">
 <meta name="referrer" content="no-referrer">
 <meta name="theme-color" content="#0B4F82">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -125,6 +125,22 @@ h2{font-size:15px;color:var(--mute);font-weight:600;margin:24px 0 8px;text-trans
 .empty{color:var(--mute);text-align:center;padding:28px 12px}
 .bar{position:fixed;left:0;right:0;bottom:0;padding:12px 16px calc(12px + env(safe-area-inset-bottom));background:linear-gradient(transparent,var(--bg) 30%);display:grid;grid-template-columns:1fr auto;gap:10px}
 .bar .danger{width:auto}
+/* Rundgang */
+.tour{position:fixed;inset:0;z-index:55}
+.tour-spot{position:fixed;border-radius:14px;box-shadow:0 0 0 9999px #02090fcc;outline:3px solid var(--green);transition:left .25s,top .25s,width .25s,height .25s;pointer-events:none}
+.tour-spot.leer{outline:0}
+.tour-card{position:fixed;left:16px;right:16px;max-width:440px;margin:0 auto;border-color:var(--green);box-shadow:0 12px 40px #000c}
+.tour-card.unten{bottom:calc(16px + env(safe-area-inset-bottom))}
+.tour-card.oben{top:calc(16px + env(safe-area-inset-top))}
+.tour-card.mitte{top:50%;transform:translateY(-50%)}
+.tour-step{color:var(--green);font-size:12px;font-weight:700;letter-spacing:.6px}
+.tour-card h3{margin:4px 0 6px;font-size:19px}
+.tour-card p{margin:0 0 14px;line-height:1.45}
+.tour-nav{display:flex;gap:8px}
+.tour-nav .btn{width:auto}
+#tourSkip{margin-right:auto;border:0;background:none;color:var(--mute);padding:0 4px}
+#tourNext{min-width:112px}
+.tour-btn{width:28px;padding:4px 0;text-align:center}
 #toast{position:fixed;z-index:60;left:16px;right:16px;bottom:calc(84px + env(safe-area-inset-bottom));background:#12304a;border:1px solid var(--line);border-radius:12px;padding:12px 14px;text-align:center;transition:opacity .2s;opacity:0;pointer-events:none}
 #toast.on{opacity:1}
 @media (min-width:640px){body{max-width:600px;margin:0 auto}header{margin:0 0 16px;border-radius:0 0 16px 16px}.bar{max-width:600px;margin:0 auto}}
@@ -162,7 +178,7 @@ h2{font-size:15px;color:var(--mute);font-weight:600;margin:24px 0 8px;text-trans
   </div>
 </div>
 
-<header><h1>Lager<span>Buddy</span></h1><div class="hmeta"><button class="picker-btn" type="button" id="pickerBtn"></button><span class="ver" id="ver"></span></div></header>
+<header><h1>Lager<span>Buddy</span></h1><div class="hmeta"><button class="picker-btn tour-btn" type="button" id="tourBtn" aria-label="Rundgang starten" title="Rundgang">?</button><button class="picker-btn" type="button" id="pickerBtn"></button><span class="ver" id="ver"></span></div></header>
 
 <main>
   <div class="card update" id="update" role="status" hidden>
@@ -275,10 +291,24 @@ h2{font-size:15px;color:var(--mute);font-weight:600;margin:24px 0 8px;text-trans
     <button class="btn danger" type="button" id="pickClear">Verwerfen</button>
   </div>
 </div>
+<div class="tour" id="tour" hidden role="dialog" aria-modal="true" aria-labelledby="tourTitle" aria-describedby="tourText">
+  <div class="tour-spot" id="tourSpot"></div>
+  <div class="card tour-card" id="tourCard">
+    <div class="tour-step" id="tourStep"></div>
+    <h3 id="tourTitle"></h3>
+    <p id="tourText"></p>
+    <div class="tour-nav">
+      <button class="btn" type="button" id="tourSkip">Beenden</button>
+      <button class="btn" type="button" id="tourPrev">Zurück</button>
+      <button class="btn primary" type="button" id="tourNext">Weiter</button>
+    </div>
+  </div>
+</div>
 <div id="toast" role="status" aria-live="polite"></div>
 
-<script src="parse.js?v=2026-09-24.12"></script>
-<script src="picks.js?v=2026-09-24.12"></script>
-<script src="app.js?v=2026-09-24.12"></script>
+<script src="parse.js?v=2026-09-24.13"></script>
+<script src="picks.js?v=2026-09-24.13"></script>
+<script src="app.js?v=2026-09-24.13"></script>
+<script src="tour.js?v=2026-09-24.13"></script>
 </body>
 </html>
