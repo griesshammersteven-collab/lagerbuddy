@@ -292,6 +292,24 @@ function stripTableLines(rgba, W, H) {
   return out;
 }
 
+// Läuft die Schrift senkrecht (Blatt quer fotografiert)? rgba: Bild NACH stripTableLines (schwarze Schrift auf weiß,
+// Tabellenlinien schon weg). Textzeilen ergeben quer zur Leserichtung ein starkes Auf und Ab (Zeile, Lücke, Zeile),
+// längs der Zeile ist die Tinte gleichmäßiger verteilt. Gemessen als Gesamtschwankung der Tintensummen in Streifen
+// von 0,5 % der Bildgröße, je Richtung normiert. Ergebnis > 1: senkrechte Schrift wahrscheinlicher.
+function verticalTextScore(rgba, W, H) {
+  const rows = new Float64Array(H), cols = new Float64Array(W);
+  for (let y = 0, i = 0; y < H; y++) for (let x = 0; x < W; x++, i += 4) if (rgba[i] < 128) { rows[y]++; cols[x]++; }
+  const tv = (a, n) => {
+    const b = Math.max(2, Math.round(n * 0.005)), bins = [];
+    for (let k = 0; k < n; k += b) { let s = 0; for (let j = k; j < Math.min(n, k + b); j++) s += a[j]; bins.push(s); }
+    let d = 0, t = 0;
+    for (let k = 0; k < bins.length; k++) { t += bins[k]; if (k) d += Math.abs(bins[k] - bins[k - 1]); }
+    return t ? d / t : 0;
+  };
+  const r = tv(rows, H), c = tv(cols, W);
+  return r ? c / r : 0;
+}
+
 // Fotografierte Pickliste (Papier statt Excel) in dasselbe Zeilen/Spalten-Raster verwandeln, das
 // parsePicklist() schon von XLSX.utils.sheet_to_json(..., {header:1}) kennt -- dieselbe Auswertung
 // (Artikel-Erkennung, Charge/Menge, Von->Nach im Titel) läuft dann für beide Wege unverändert.
@@ -389,10 +407,13 @@ function picklistGridFromWords(ocrLines, width) {
     headY = Math.min(...frags.filter(f => f.col === artCol && isArt(f)).map(f => f.y)) - 1;
   }
 
+  // Weiter als ~4 Schrifthöhen unter einer Artikelzeile gehört nichts mehr zu ihr: auf dem echten Blatt folgen viele
+  // leere Zeilen und dann die Fußzeile ("Version: 001/19.08" landete sonst als Charge, "erstellt von: …" in der Bezeichnung)
+  const reach = r => 4 * (artHead?.h || r.h || 0);
   const recs = [];
   for (const f of frags.filter(f => f.col === artCol && f.y > headY).sort(byY)) {
     if (isArt(f)) recs.push({ y: f.y, h: f.h, art: firstTok(f.text), bez: [] });
-    else if (recs.length && !anyHead(f)) recs.at(-1).bez.push(f.text);
+    else if (recs.length && !anyHead(f) && f.y - recs.at(-1).y <= reach(recs.at(-1))) recs.at(-1).bez.push(f.text);
   }
   // Erstes Zeichen am Zellrand verschluckt ("10006349PFL"), dieselbe Nummer steht aber vollständig in einer anderen
   // Zeile (gleicher Artikel, zweite Charge) -> die vollständige nehmen
@@ -407,8 +428,9 @@ function picklistGridFromWords(ocrLines, width) {
   const groups = new Map();
   // Werte erst ab der ersten Artikelzeile: darüber stehen noch Kopfzeilen anderer Spalten ("BA-Nr. / Kunde", "best.")
   const valFrom = recs.length ? firstY - 0.8 * (artHead?.h || recs[0].h || 0) : headY;
+  const valTo = recs.length ? recs.at(-1).y + reach(recs.at(-1)) : Infinity;
   for (const f of frags) {
-    if (f.col === artCol || f.y <= headY || f.y < valFrom || anyHead(f)) continue;
+    if (f.col === artCol || f.y <= headY || f.y < valFrom || f.y > valTo || anyHead(f)) continue;
     if (!groups.has(f.col)) groups.set(f.col, []);
     groups.get(f.col).push(f);
   }
@@ -488,4 +510,4 @@ function applyPicklist(r, codes, lines) {
   return out;
 }
 
-if (typeof module !== 'undefined') module.exports = { cleanLine, parseLabel, parsePicklist, applyPicklist, picklistGridFromWords, stripTableLines, skewAngle, gebindeCount, normArt, normCharge, requiredLabelColor, classifyLabelColor };
+if (typeof module !== 'undefined') module.exports = { cleanLine, parseLabel, parsePicklist, applyPicklist, picklistGridFromWords, stripTableLines, skewAngle, verticalTextScore, gebindeCount, normArt, normCharge, requiredLabelColor, classifyLabelColor };
