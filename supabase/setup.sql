@@ -124,7 +124,7 @@ revoke all on function public.lb_ok(text, text), public.lb_zugang(text), public.
   from public, anon, authenticated;
 revoke all on function public.lb_pruefen(text), public.lb_teamleiter(text, text, text),
   public.lb_liste(text, timestamptz), public.lb_speichern(text, text, jsonb, integer, text, text),
-  public.lb_loeschen(text, text, text, text) from public;
+  public.lb_loeschen(text, text, text, text) from public, authenticated; -- die App nutzt keine Supabase-Logins
 grant execute on function public.lb_pruefen(text), public.lb_teamleiter(text, text, text),
   public.lb_liste(text, timestamptz), public.lb_speichern(text, text, jsonb, integer, text, text),
   public.lb_loeschen(text, text, text, text) to anon;

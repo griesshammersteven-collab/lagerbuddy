@@ -2,7 +2,7 @@
 /* LagerBuddy: Etikett fotografieren -> Barcodes + Text lokal auf dem Handy lesen -> Liste -> Excel.
    Alle Bibliotheken liegen in vendor/, kein Foto verlässt das Gerät. Nur Picklisten (Positionen, Zuteilung,
    Buchungen) werden über Supabase zwischen den Handys abgeglichen, wenn SYNC unten eingerichtet ist. */
-const APP_VERSION = '2026-09-24.4'; // bei JEDER Veröffentlichung erhöhen, genauso wie ?v= in index.html
+const APP_VERSION = '2026-09-24.5'; // bei JEDER Veröffentlichung erhöhen, genauso wie ?v= in index.html
 // Alte index.html (CDN/Offline-Speicher) mit neuerem app.js-Inhalt: dann fehlen Knöpfe und der Start bricht ab.
 // Einmal frisch laden (eindeutige URL geht am CDN vorbei), bevor irgendetwas verdrahtet wird.
 {
@@ -21,7 +21,7 @@ const KEY_LAGER = 'lagerbuddy_lager'; // Lager-Code dieses Handys (einmal eingeb
 // Supabase-Projekt, über das die Handys ihre Picklisten abgleichen (Einrichtung: supabase/ANLEITUNG.md).
 // Der Schlüssel ist der öffentliche "publishable"/"anon"-Schlüssel -- geschützt wird über den Lager-Code.
 // Leer = kein Abgleich, Picklisten bleiben nur auf diesem Handy.
-const SYNC = window.__testSync || { url: '', key: '' };
+const SYNC = window.__testSync || { url: 'https://wmrecedjrfsqrbufgipz.supabase.co', key: 'sb_publishable_DMJFGsMnLTLspy4ETD1BKg_Xg-R4W2U' };
 const SYNC_ON = !!(SYNC.url && SYNC.key);
 const FIELDS = ['artikel', 'bez1', 'bez2', 'charge'];
 const fmtN = n => n.toLocaleString('de-DE');

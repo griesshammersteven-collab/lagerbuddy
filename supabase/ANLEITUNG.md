@@ -1,5 +1,9 @@
 # Picklisten-Abgleich einrichten (Supabase)
 
+> **Stand:** eingerichtet am 24.09.2026. Projekt `lagerbuddy` (`wmrecedjrfsqrbufgipz`), Region Frankfurt,
+> Free-Tarif. URL und Publishable Key stehen in `app.js`. Die Schritte unten braucht es nur für ein neues Projekt
+> oder um Codes zu ändern (Schritt 2.3).
+
 Damit Teamleiter und Picker mit **verschiedenen Handys** arbeiten können, gleichen die Handys ihre
 Picklisten über ein Supabase-Projekt ab. Einmalig etwa 5 Minuten.
 
