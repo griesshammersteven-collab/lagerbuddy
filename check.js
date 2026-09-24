@@ -151,4 +151,19 @@ test('Sammelbuchung: 14 gleiche Gebinde in einer Buchung, idempotent', () => {
   assert.strictEqual(d.lines[0].scans.length, 1);
 });
 
+test('Eingaben im deutschen Format: Komma, Tausenderpunkt, Einheit', () => {
+  const { parseDe } = require('./parse.js');
+  const want = { '25': 25, '12,5': 12.5, '1.000': 1000, '1.000,5': 1000.5, '12.5': 12.5, '25 kg': 25, '24 Stk': 24, '0,5': 0.5 };
+  for (const [k, v] of Object.entries(want)) assert.strictEqual(parseDe(k), v, k);
+  for (const k of ['', 'abc', '-3', '1,2,3']) assert.ok(Number.isNaN(parseDe(k)), k);
+});
+
+test('Kaputte Picklisten vom Server werden erkannt', () => {
+  const { gueltig } = require('./picks.js');
+  assert.ok(gueltig(base()));
+  for (const d of [null, [], { lines: {} }, { lines: [null] }, { lines: [{ artikel: 'X' }] },
+    { lines: [{ lid: 'a', artikel: 'X', required: 1, picked: 0, scans: [null] }] },
+    { lines: [{ lid: 'a', artikel: 'X', required: '1', picked: 0, scans: [] }] }]) assert.ok(!gueltig(d), JSON.stringify(d));
+});
+
 if (failed) { console.log(`\n${failed} Test(s) fehlgeschlagen`); process.exit(1); }

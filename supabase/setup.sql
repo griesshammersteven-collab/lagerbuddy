@@ -54,6 +54,31 @@ language sql stable security definer set search_path = public, extensions as $$
   select kuerzel is not null and public.lb_ok('tl:' || kuerzel, pw);
 $$;
 
+-- intern: Aufbau einer Pickliste prüfen (dieselben Regeln wie gueltig() in picks.js). Eine kaputte Liste würde sonst
+-- auf jedem Handy beim Abgleich landen und dort das Buchen lahmlegen; die Größengrenzen schützen den Handyspeicher.
+create or replace function public.lb_doc_ok(doc jsonb) returns boolean
+language plpgsql immutable set search_path = public as $$
+declare
+  l jsonb;
+  s jsonb;
+begin
+  -- einzeln geprüft statt mit "or" verkettet: jsonb_array_length auf etwas anderes als ein Array wäre ein Fehler
+  if coalesce(jsonb_typeof(doc), '') <> 'object' then return false; end if;
+  if coalesce(jsonb_typeof(doc -> 'lines'), '') <> 'array' then return false; end if;
+  if jsonb_array_length(doc -> 'lines') > 500 or pg_column_size(doc) > 300000 then return false; end if;
+  for l in select * from jsonb_array_elements(doc -> 'lines') loop
+    if jsonb_typeof(l) <> 'object' then return false; end if;
+    if coalesce(jsonb_typeof(l -> 'lid'), '') <> 'string' or coalesce(jsonb_typeof(l -> 'artikel'), '') <> 'string'
+       or coalesce(jsonb_typeof(l -> 'required'), '') <> 'number' or coalesce(jsonb_typeof(l -> 'picked'), '') <> 'number'
+       or coalesce(jsonb_typeof(l -> 'scans'), '') <> 'array' then return false; end if;
+    if length(l ->> 'lid') > 200 or length(l ->> 'artikel') > 200 or jsonb_array_length(l -> 'scans') > 2000 then return false; end if;
+    for s in select * from jsonb_array_elements(l -> 'scans') loop
+      if jsonb_typeof(s) <> 'object' or coalesce(jsonb_typeof(s -> 'menge'), '') <> 'number' then return false; end if;
+    end loop;
+  end loop;
+  return true;
+end $$;
+
 -- Einrichtung am Handy: Lager-Code prüfen
 create or replace function public.lb_pruefen(lager text) returns boolean
 language sql stable security definer set search_path = public, extensions as $$
@@ -92,18 +117,20 @@ declare
   tl boolean;
 begin
   perform public.lb_zugang(lager);
-  -- coalesce: fehlt "lines", wäre der Vergleich NULL und die Prüfung würde stillschweigend durchgewinkt
-  if id is null or length(id) > 64 or coalesce(jsonb_typeof(doc), '') <> 'object'
-     or coalesce(jsonb_typeof(doc -> 'lines'), '') <> 'array' or pg_column_size(doc) > 1000000 then
+  if id is null or length(id) > 64 or not public.lb_doc_ok(doc) then
     raise exception 'lb_daten: ungültige Pickliste';
   end if;
   tl := public.lb_ist_tl(tl_kuerzel, tl_pw);
   select * into alt from public.lb_picks p where p.id = lb_speichern.id for update;
   if not found then
+    -- auch eine neue Liste darf nur ein Teamleiter gleich als freigegeben anlegen
+    if not tl and coalesce(jsonb_typeof(doc -> 'freigabe'), 'null') <> 'null' then
+      raise exception 'lb_teamleiter: nur Teamleiter dürfen freigeben';
+    end if;
     insert into public.lb_picks (id, doc) values (lb_speichern.id, lb_speichern.doc) returning * into neu;
     return jsonb_build_object('ok', true, 'row', to_jsonb(neu));
   end if;
-  if alt.geloescht or alt.rev <> basis then
+  if alt.geloescht or basis is null or alt.rev <> basis then -- ohne basis keine Konfliktprüfung: dann als Konflikt
     return jsonb_build_object('ok', false, 'row', to_jsonb(alt));
   end if;
   if not tl and (alt.doc -> 'fuer' is distinct from doc -> 'fuer' or alt.doc -> 'freigabe' is distinct from doc -> 'freigabe') then
@@ -129,8 +156,8 @@ begin
   return jsonb_build_object('ok', true, 'row', to_jsonb(neu));
 end $$;
 
-revoke all on function public.lb_ok(text, text), public.lb_zugang(text), public.lb_ist_tl(text, text), public.lb_norm(text)
-  from public, anon, authenticated;
+revoke all on function public.lb_ok(text, text), public.lb_zugang(text), public.lb_ist_tl(text, text), public.lb_norm(text),
+  public.lb_doc_ok(jsonb) from public, anon, authenticated;
 revoke all on function public.lb_pruefen(text), public.lb_teamleiter(text, text, text),
   public.lb_liste(text, timestamptz), public.lb_speichern(text, text, jsonb, integer, text, text),
   public.lb_loeschen(text, text, text, text) from public, authenticated; -- die App nutzt keine Supabase-Logins

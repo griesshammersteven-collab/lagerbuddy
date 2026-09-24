@@ -130,6 +130,15 @@ function parseQty(raw, text) {
   return { n: parseFloat(t.replace(',', '.')), kg: !!m[2] };
 }
 
+// Zahl aus einer Eingabe im deutschen Format, wie die App sie selbst anzeigt: "12,5", "1.000", "1.000,5", auch mit
+// Einheit dahinter ("25 kg"). Ein Punkt vor genau drei Ziffern ist ein Tausenderpunkt ("1.000" = 1000, sonst stand
+// dort 1 und jeder weitere Scan scheiterte an "höchstens 1 Stück"); "12.5" bleibt 12,5. Ungültig/leer -> NaN.
+function parseDe(raw) {
+  let t = String(raw ?? '').replace(/\s+/g, '').replace(/(kg|stück|stk|st)\.?$/i, '');
+  if (/^\d{1,3}(\.\d{3})+(,\d+)?$/.test(t)) t = t.replace(/\./g, '');
+  return /^\d+([.,]\d+)?$/.test(t) ? parseFloat(t.replace(',', '.')) : NaN;
+}
+
 // Artikelnummer: beginnt mit mind. 3 Ziffern ("10006349PFL", "931000136000"). Aber nicht, wenn auf die Ziffern
 // eine Einheit folgt -- dann ist es eine Bezeichnung ("120ml.braunglas", "250 g Dose").
 const isArticleNo = s => /^\d{3,}[A-Z0-9\-/.]*$/i.test(s) && !/^\d+(?:[.,]\d+)?\s*(?:ml|cl|l|mg|g|kg|mm|cm|m|stk|st|x)(?![a-zäöü])/i.test(s);
@@ -510,4 +519,4 @@ function applyPicklist(r, codes, lines) {
   return out;
 }
 
-if (typeof module !== 'undefined') module.exports = { cleanLine, parseLabel, parsePicklist, applyPicklist, picklistGridFromWords, stripTableLines, skewAngle, verticalTextScore, gebindeCount, normArt, normCharge, requiredLabelColor, classifyLabelColor };
+if (typeof module !== 'undefined') module.exports = { parseDe, cleanLine, parseLabel, parsePicklist, applyPicklist, picklistGridFromWords, stripTableLines, skewAngle, verticalTextScore, gebindeCount, normArt, normCharge, requiredLabelColor, classifyLabelColor };

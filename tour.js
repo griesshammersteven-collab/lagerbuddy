@@ -74,6 +74,8 @@ const TOUR_MASTER = [
 let tour = null; // { schritte, i, vorher: { mode, openId, y }, timer }
 function tourStart() {
   if (tour || !picker) return;
+  // Halb erfasstes Etikett oder laufende Texterkennung nicht wegwerfen
+  if (busy || !$('form').hidden) { toast('Bitte zuerst das Etikett fertig buchen oder verwerfen, dann den Rundgang starten.'); return; }
   const schritte = (role === 'master' ? TOUR_MASTER : TOUR_PICKER).filter(s => !s.nur || s.nur());
   tour = { schritte, i: 0, vorher: { mode, openId, y: window.scrollY } };
   tourDemo = role === 'master' ? tourDaten('AA', true) : tourDaten(picker, false); // Teamleiter sehen Listen ihrer Picker
@@ -97,6 +99,8 @@ function tourEnde() {
   openId = vorher.openId; recompute();
   setMode(vorher.mode);
   window.scrollTo({ top: vorher.y });
+  // Beim ersten Anmelden kam die zugeteilte Liste erst während des Rundgangs vom Server: jetzt hinführen
+  if (landenNachTour) { landenNachTour = false; if (!pick) landen(); }
 }
 function tourZeigen() {
   const s = tour.schritte[tour.i], n = tour.schritte.length;
