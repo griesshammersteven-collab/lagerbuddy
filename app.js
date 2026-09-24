@@ -1,7 +1,7 @@
 'use strict';
 /* LagerBuddy: Etikett fotografieren -> Barcodes + Text lokal auf dem Handy lesen -> Liste -> Excel.
    Alle Bibliotheken liegen in vendor/, kein Bild und keine Nummer verlässt das Gerät. */
-const APP_VERSION = '2026-09-23.17'; // bei JEDER Veröffentlichung erhöhen, genauso wie ?v= in index.html
+const APP_VERSION = '2026-09-24.1'; // bei JEDER Veröffentlichung erhöhen, genauso wie ?v= in index.html
 // Alte index.html (CDN/Offline-Speicher) mit neuerem app.js-Inhalt: dann fehlen Knöpfe und der Start bricht ab.
 // Einmal frisch laden (eindeutige URL geht am CDN vorbei), bevor irgendetwas verdrahtet wird.
 {
@@ -13,17 +13,20 @@ const APP_VERSION = '2026-09-23.17'; // bei JEDER Veröffentlichung erhöhen, ge
 }
 const LOCAL = new URL('vendor/', location.href).href;
 const KEY = 'lagerbuddy_v1';
-const KEY_PICK = 'lagerbuddy_pick_v1';
+const KEY_PICK = 'lagerbuddy_pick_v1'; // alt: genau eine Pickliste, wird beim Start nach KEY_PICKS übernommen
+const KEY_PICKS = 'lagerbuddy_picks_v1'; // mehrere Picklisten, jede einem Picker zugeteilt
 const FIELDS = ['artikel', 'bez1', 'bez2', 'charge'];
 const fmtN = n => n.toLocaleString('de-DE');
 const PICK_ENABLED = true;
 const CODE_OK = /^[0-9A-Z][0-9A-Z\-. $\/+%]{0,39}$/; // Code39-Zeichensatz, Länge gedeckelt gegen Unsinn auf einem manipulierten Etikett
 const $ = id => document.getElementById(id);
+const newId = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
 
 try { navigator.storage?.persist?.(); } catch {} // hilft gegen Löschen durch den Browser nach längerer Nichtnutzung
 
 let list = load();
-let pick = loadPick();
+let picks = loadPicks();
+let pick = null; // die gerade geöffnete Pickliste (ein Eintrag aus picks), null = Übersicht
 let picker = '', role = ''; // erst nach der Auswahl am Zugangs-Gate gültig, siehe ganz unten
 let mode = 'scan'; // 'scan' (freie Liste) oder 'pick' (Pickliste)
 let busy = false;
@@ -40,15 +43,22 @@ function save() {
   try { localStorage.setItem(KEY, JSON.stringify(list)); return true; }
   catch { toast('Speichern fehlgeschlagen. Ist der Speicher voll?'); return false; }
 }
-function loadPick() {
+function loadPicks() {
+  const ok = v => v && typeof v === 'object' && Array.isArray(v.lines);
   try {
-    const v = JSON.parse(localStorage.getItem(KEY_PICK));
-    return v && typeof v === 'object' && Array.isArray(v.lines) ? v : null;
-  } catch { return null; }
+    const v = JSON.parse(localStorage.getItem(KEY_PICKS));
+    if (Array.isArray(v)) return v.filter(ok);
+    // Stand vor der Picker-Zuteilung: die eine Pickliste übernehmen, ohne Zuteilung (sehen alle)
+    const old = JSON.parse(localStorage.getItem(KEY_PICK));
+    return ok(old) ? [{ id: newId(), fuer: '', ...old }] : [];
+  } catch { return []; }
 }
 function savePick() {
-  try { localStorage.setItem(KEY_PICK, JSON.stringify(pick)); return true; }
-  catch { toast('Speichern fehlgeschlagen. Ist der Speicher voll?'); return false; }
+  try {
+    localStorage.setItem(KEY_PICKS, JSON.stringify(picks));
+    localStorage.removeItem(KEY_PICK); // erst nach erfolgreichem Speichern im neuen Format
+    return true;
+  } catch { toast('Speichern fehlgeschlagen. Ist der Speicher voll?'); return false; }
 }
 
 let toastT;
@@ -121,19 +131,61 @@ function setMode(m) {
   $('freeListView').hidden = m !== 'scan';
   $('pickView').hidden = m !== 'pick';
   $('exportBar').hidden = m !== 'scan';
-  $('pickBar').hidden = m !== 'pick' || role !== 'master';
+  $('pickBar').hidden = true; // im Pickliste-Modus entscheidet renderPick
   if (m === 'pick') renderPick(); else $('scan').hidden = false;
 }
 $('modeScan').onclick = () => setMode('scan');
 $('modePick').onclick = () => setMode('pick');
 
 /* ---------- Pickliste ---------- */
+// Teamleiter lädt eine Pickliste und teilt sie einem Picker zu; der Picker sieht nach seiner Anmeldung nur die
+// eigenen Listen. Alles liegt in localStorage dieses Handys -- Zuteilen und Abarbeiten klappt also nur auf
+// demselben (geteilten) Lagerhandy, nicht über mehrere Geräte hinweg.
+const pickDone = p => !!p.freigabe || p.lines.every(l => l.picked >= l.required);
+const visiblePicks = () => picks.filter(p => role === 'master' || !p.fuer || p.fuer === picker)
+  .sort((a, b) => pickDone(a) - pickDone(b) || b.importedAt - a.importedAt); // offene zuerst, neueste oben
+function openPick(p) {
+  pick = p;
+  renderPick();
+  window.scrollTo({ top: 0 });
+}
+function fillPickerSelect(sel, value, placeholder) {
+  const opts = [];
+  if (placeholder) { const o = new Option(placeholder, ''); o.disabled = true; opts.push(o); }
+  for (const c of [...PICKERS, ...MASTERS]) opts.push(new Option(c, c));
+  if (value && !opts.some(o => o.value === value)) opts.push(new Option(value, value)); // Kürzel, das es nicht mehr gibt
+  sel.replaceChildren(...opts);
+  sel.value = value || '';
+}
+function renderPickOverview() {
+  const vis = visiblePicks(), isMaster = role === 'master';
+  $('pickCardsHead').hidden = !vis.length;
+  $('pickNone').hidden = !!vis.length || isMaster;
+  $('pickCards').replaceChildren(...vis.map(p => {
+    const li = document.createElement('li'); li.className = 'card' + (pickDone(p) ? ' done' : '');
+    const b = document.createElement('button');
+    b.type = 'button'; b.className = 'entry';
+    const done = p.lines.filter(l => l.picked >= l.required).length;
+    const head = document.createElement('div'); head.className = 'nums';
+    head.textContent = (pickDone(p) ? '✓ ' : '') + p.name;
+    const sub = document.createElement('div'); sub.className = 'sub';
+    sub.textContent = [p.fuer ? 'für ' + p.fuer : 'nicht zugeteilt', `${done} von ${p.lines.length} fertig`,
+      new Date(p.importedAt).toLocaleString('de-DE', { dateStyle: 'short', timeStyle: 'short' })].join(' · ');
+    b.append(head, sub);
+    b.onclick = () => openPick(p);
+    li.append(b);
+    return li;
+  }));
+  $('pickFuerRow').hidden = !isMaster;
+  if (isMaster && !$('pickFuer').options.length) fillPickerSelect($('pickFuer'), '', 'Picker auswählen …');
+}
 function renderPick() {
-  const has = pick && pick.lines.length > 0;
-  $('pickEmpty').hidden = !!has;
-  $('pickBody').hidden = !has;
-  $('scan').hidden = !has; // ohne Liste gibt es nur "Pickliste fotografieren" -- sonst landet die ganze Seite im Etikett-Leser
-  if (!has) return;
+  if (pick && !picks.includes(pick)) pick = null; // z. B. verworfen
+  $('pickOverview').hidden = !!pick;
+  $('pickBody').hidden = !pick;
+  $('scan').hidden = !pick; // ohne geöffnete Liste gibt es nichts zu buchen -- sonst landet die Seite im Etikett-Leser
+  $('pickBar').hidden = mode !== 'pick' || role !== 'master' || !pick;
+  if (!pick) { renderPickOverview(); return; }
   const total = pick.lines.length;
   const done = pick.lines.filter(l => l.picked >= l.required).length;
   const missing = total - done;
@@ -147,7 +199,9 @@ function renderPick() {
     : needsFreigabe ? `Übersprungen: ${fehlen} – Freigabe durch Teamleiter (CMue oder MD) nötig`
     : `${done} von ${total} Artikeln fertig`;
   $('pickApprove').hidden = !(needsFreigabe && role === 'master');
-  $('pickName').textContent = pick.name;
+  $('pickName').textContent = pick.name + (pick.fuer ? ' · für ' + pick.fuer : '');
+  $('pickFuerEditRow').hidden = role !== 'master';
+  if (role === 'master') fillPickerSelect($('pickFuerEdit'), pick.fuer, pick.fuer ? '' : 'nicht zugeteilt');
   $('pickVon').value = pick.von || ''; $('pickNach').value = pick.nach || '';
   $('pickList').replaceChildren(...pick.lines.map((l, i) => {
     const li = document.createElement('li');
@@ -281,13 +335,19 @@ function addPick(e) {
     ? `Fertig: ${e.artikel} (${fmtN(line.picked)}/${fmtN(line.required)} ${line.einheit})`
     : `Gebucht: ${fmtN(e.menge)} ${e.einheit} für ${e.artikel} (${fmtN(line.picked)}/${fmtN(line.required)})`);
 }
-function applyParsedPicklist({ title, von, nach, lines, skipped }, sourceName, hinweis) {
-  pick = { name: title ? `${title} · ${sourceName}` : sourceName, von, nach, importedAt: Date.now(), lines };
-  if (!savePick()) { pick = null; return; }
-  renderPick();
-  toast(`Pickliste geladen: ${lines.length} Artikel.` + (skipped ? ` ${skipped} Zeile(n) ohne Menge übersprungen.` : '') + (hinweis || ''));
+// target: { replace: Pickliste } = deren Positionen ersetzen (Zuteilung bleibt), { fuer: Kürzel } = neue Liste
+function applyParsedPicklist({ title, von, nach, lines, skipped }, sourceName, target, hinweis) {
+  const data = { name: title ? `${title} · ${sourceName}` : sourceName, von, nach, importedAt: Date.now(), lines };
+  const before = JSON.stringify(picks), wasOpen = pick?.id;
+  let p = target.replace;
+  if (p && picks.includes(p)) { Object.assign(p, data); delete p.freigabe; }
+  else { p = { id: newId(), fuer: target.fuer || p?.fuer || '', geladenVon: picker, ...data }; picks.push(p); } // p: während der Texterkennung verworfen
+  if (!savePick()) { picks = JSON.parse(before); pick = picks.find(x => x.id === wasOpen) || null; renderPick(); return; }
+  if (!target.replace) $('pickFuer').value = ''; // nächste Liste bewusst neu zuteilen statt aus Versehen demselben Picker
+  openPick(p);
+  toast(`Pickliste geladen: ${lines.length} Artikel` + (role === 'master' && p.fuer ? ` für ${p.fuer}.` : '.') + (skipped ? ` ${skipped} Zeile(n) ohne Menge übersprungen.` : '') + (hinweis || ''));
 }
-async function loadPicklistFile(file) {
+async function loadPicklistFile(file, target) {
   if (!file) return;
   if (role !== 'master') { toast('Nur CMue oder MD können eine Pickliste laden.'); return; } // Knöpfe sind zwar schon versteckt, hier zusätzlich abgesichert
   try {
@@ -298,7 +358,7 @@ async function loadPicklistFile(file) {
     // roh (Zahlen) und formatiert (Text wie "8 kg", führende Nullen) nebeneinander, gleiche Zeilen
     const raw = XLSX.utils.sheet_to_json(ws, { header: 1, raw: true, defval: '', blankrows: true });
     const fmt = XLSX.utils.sheet_to_json(ws, { header: 1, raw: false, defval: '', blankrows: true });
-    applyParsedPicklist(parsePicklist(raw, fmt), file.name);
+    applyParsedPicklist(parsePicklist(raw, fmt), file.name, target);
   } catch (err) {
     if (!err?.userMessage) console.error(err);
     toast(err instanceof Error && err.message.length < 120 ? err.message : 'Excel-Datei konnte nicht gelesen werden.');
@@ -307,7 +367,7 @@ async function loadPicklistFile(file) {
 // Pickliste vom Papier fotografieren: Texterkennung liest die ganze Seite, die x-Position jedes Worts
 // verrät die Tabellenspalte (picklistGridFromWords), danach läuft dieselbe Auswertung wie beim Excel-Import.
 // Weniger zuverlässig als die Excel-Datei -- am Ende steht deshalb ein deutlicher Prüfhinweis.
-async function loadPicklistPhoto(file) {
+async function loadPicklistPhoto(file, target) {
   // Für alle offen (nicht nur Teamleiter): die gedruckte Liste landet oft direkt beim Picker, ohne
   // vorher digital beim Teamleiter vorbeizukommen. Nur die Excel-Datei bleibt Teamleiter-only.
   if (!file || busy) return;
@@ -315,7 +375,7 @@ async function loadPicklistPhoto(file) {
   setBusy(true, 'Pickliste wird gelesen …');
   let canvas;
   try {
-    canvas = await toCanvas(file, 3000); // mehr Auflösung als beim Etikett: kleine Schrift über die ganze Seite
+    canvas = deskew(await toCanvas(file, 3000)); // mehr Auflösung als beim Etikett: kleine Schrift über die ganze Seite
     const ctx = canvas.getContext('2d');
     const img = ctx.getImageData(0, 0, canvas.width, canvas.height);
     img.data.set(stripTableLines(img.data, canvas.width, canvas.height));
@@ -327,15 +387,35 @@ async function loadPicklistPhoto(file) {
     try { r = await withTimeout(worker.recognize(canvas, { rotateAuto: true }), 120000, 'Texterkennung hat zu lange gedauert'); }
     finally { await worker.setParameters({ tessedit_pageseg_mode: '3' }); } // Etiketten lesen weiter mit Seitenlayout
     const grid = picklistGridFromWords(r.data.lines, canvas.width);
-    applyParsedPicklist(parsePicklist(grid, grid), file.name,
+    if (!grid.length) throw pickErr('Keine Pickliste im Foto erkannt. Bitte die ganze Tabelle gerade von oben und bei gutem Licht fotografieren.');
+    applyParsedPicklist(parsePicklist(grid, grid), file.name, target,
       ' Bitte die Zeilen unten prüfen – von einem Foto liest die App nicht so zuverlässig wie aus Excel.');
   } catch (err) {
     if (!err?.userMessage) console.error(err);
-    toast(err instanceof Error && err.message.length < 120 ? err.message : 'Foto konnte nicht gelesen werden.');
+    toast(err?.userMessage || (err instanceof Error && err.message.length < 120) ? err.message : 'Foto konnte nicht gelesen werden.');
   } finally {
     setBusy(false);
     if (canvas) { canvas.width = 0; canvas.height = 0; }
   }
+}
+// Schräg gehaltenes Handy: Blatt gerade drehen, sonst erkennt stripTableLines die Tabellenlinien nicht mehr
+// als Linien (Test: 5° schief -> Striche als "1" in Chargen/Artikelnummern). Winkel aus einem kleinen Vorschaubild.
+function deskew(c) {
+  const k = 600 / Math.max(c.width, c.height), s = document.createElement('canvas');
+  s.width = Math.round(c.width * k); s.height = Math.round(c.height * k);
+  s.getContext('2d').drawImage(c, 0, 0, s.width, s.height);
+  const deg = skewAngle(s.getContext('2d').getImageData(0, 0, s.width, s.height).data, s.width, s.height);
+  s.width = s.height = 0;
+  if (Math.abs(deg) < 0.3) return c;
+  const a = deg * Math.PI / 180, cos = Math.abs(Math.cos(a)), sin = Math.abs(Math.sin(a));
+  const out = document.createElement('canvas');
+  out.width = Math.round(c.width * cos + c.height * sin); out.height = Math.round(c.width * sin + c.height * cos);
+  const ctx = out.getContext('2d');
+  ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, out.width, out.height);
+  ctx.translate(out.width / 2, out.height / 2); ctx.rotate(-a);
+  ctx.drawImage(c, -c.width / 2, -c.height / 2);
+  c.width = c.height = 0; // iOS: Canvas-Speicher sofort freigeben
+  return out;
 }
 // Lagerplatz: von Excel-Titel vorbelegt ("Pickliste B4 -> Bühl"), hier jederzeit nachtragbar/korrigierbar
 function savePickRoute() {
@@ -345,17 +425,44 @@ function savePickRoute() {
 }
 $('pickVon').addEventListener('change', savePickRoute);
 $('pickNach').addEventListener('change', savePickRoute);
-$('pickChoose').onclick = () => $('pickFile').click();
-$('pickReplace').onclick = () => $('pickFile').click();
-$('pickFile').onchange = ev => { const f = ev.target.files[0]; ev.target.value = ''; loadPicklistFile(f); };
-$('pickPhotoChoose').onclick = () => $('pickCam').click();
-$('pickPhotoReplace').onclick = () => $('pickCam').click();
-$('pickCam').onchange = $('pickGal').onchange = ev => { const f = ev.target.files[0]; ev.target.value = ''; loadPicklistPhoto(f); };
+// Ziel beim Antippen festhalten (Datei-Dialog kommt erst später zurück): neue Liste für wen, oder welche ersetzen.
+// Teamleiter müssen vorher einen Picker auswählen, ein Picker bekommt seine selbst fotografierte Liste selbst.
+let pickTarget = null;
+function newPickTarget() {
+  if (role !== 'master') return { fuer: picker };
+  const fuer = $('pickFuer').value;
+  $('pickFuerRow').classList.toggle('missing', !fuer);
+  if (!fuer) { toast('Bitte zuerst den Picker auswählen, der die Liste abarbeiten soll.'); $('pickFuer').focus(); return null; }
+  return { fuer };
+}
+function choose(input, target) { if (target) { pickTarget = target; $(input).click(); } }
+$('pickChoose').onclick = () => choose('pickFile', newPickTarget());
+$('pickReplace').onclick = () => choose('pickFile', pick && { replace: pick });
+$('pickPhotoChoose').onclick = () => choose('pickCam', newPickTarget());
+$('pickPhotoReplace').onclick = () => choose('pickCam', pick && { replace: pick });
+$('pickGalBtn').onclick = ev => { // <label> öffnet die Galerie selbst -- nur ohne Picker-Auswahl abfangen
+  if (ev.target === $('pickGal')) return;
+  const t = newPickTarget();
+  if (t) pickTarget = t; else ev.preventDefault();
+};
+$('pickFuer').onchange = () => $('pickFuerRow').classList.remove('missing');
+$('pickFile').onchange = ev => { const f = ev.target.files[0]; ev.target.value = ''; if (pickTarget) loadPicklistFile(f, pickTarget); };
+$('pickCam').onchange = $('pickGal').onchange = ev => { const f = ev.target.files[0]; ev.target.value = ''; if (pickTarget) loadPicklistPhoto(f, pickTarget); };
+$('pickFuerEdit').onchange = () => {
+  if (role !== 'master' || !pick) return;
+  const before = pick.fuer;
+  pick.fuer = $('pickFuerEdit').value;
+  if (!savePick()) pick.fuer = before; else toast(`Pickliste ist jetzt ${pick.fuer} zugeteilt.`);
+  renderPick();
+};
+$('pickBack').onclick = () => { pick = null; renderPick(); };
 $('pickClear').onclick = () => {
   if (role !== 'master') { toast('Nur CMue oder MD können die Pickliste verwerfen.'); return; }
-  if (!confirm('Pickliste verwerfen? Der Fortschritt geht verloren.')) return;
+  if (!pick || !confirm('Pickliste verwerfen? Der Fortschritt geht verloren.')) return;
+  const i = picks.indexOf(pick);
+  picks.splice(i, 1);
+  if (!savePick()) { picks.splice(i, 0, pick); return; }
   pick = null;
-  try { localStorage.removeItem(KEY_PICK); } catch {}
   renderPick();
 };
 
@@ -387,6 +494,7 @@ function closeForm() {
   editIdx = null;
   if (previewUrl) { URL.revokeObjectURL(previewUrl); previewUrl = null; }
   $('preview').removeAttribute('src');
+  if (mode === 'pick') renderPick(); // ohne geöffnete Pickliste bleibt der Etikett-Leser versteckt
 }
 
 $('form').onsubmit = ev => {
@@ -665,7 +773,16 @@ const LOCK_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" st
 function login(code, r) {
   picker = code; role = r;
   $('gate').hidden = true;
+  if (!$('form').hidden) closeForm(); // halb erfasstes Etikett gehört dem vorherigen Nutzer
+  pick = null;
   renderPicker(); applyRoleUI();
+  // Picker mit zugeteilter offener Pickliste landen direkt dort (bei genau einer gleich in der Liste)
+  const open = r === 'master' ? [] : visiblePicks().filter(p => !pickDone(p));
+  if (open.length) {
+    setMode('pick');
+    if (open.length === 1) openPick(open[0]);
+    toast(open.length === 1 ? `Pickliste für ${code}: ${open[0].name}` : `${open.length} Picklisten für ${code}`);
+  }
 }
 function loginMaster(code) {
   for (let i = 0; i < 3; i++) {
@@ -698,8 +815,7 @@ function applyRoleUI() {
   const isMaster = role === 'master';
   for (const id of ['pickChoose', 'pickReplace', 'pickClear']) $(id).hidden = !isMaster;
   $('pickHintMaster').hidden = !isMaster;
-  $('pickBar').hidden = mode !== 'pick' || !isMaster;
-  if (mode === 'pick') renderPick(); // Charge-Felder/Freigabe-Knopf hängen an der Rolle
+  if (mode === 'pick') renderPick(); // Charge-Felder/Freigabe-Knopf/Picker-Auswahl/untere Leiste hängen an der Rolle
 }
 buildGate();
 if (window.__testLogin) login(window.__testLogin.code, window.__testLogin.role); // nur für die Testsuite, siehe fixtures.mjs

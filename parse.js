@@ -203,25 +203,12 @@ function gebindeCount(required, gebinde) {
   return gebinde > 0 ? Math.ceil(required / gebinde) : null;
 }
 
-// Fotografierte Pickliste (Papier statt Excel) in dasselbe Zeilen/Spalten-Raster verwandeln, das
-// parsePicklist() schon von XLSX.utils.sheet_to_json(..., {header:1}) kennt -- dieselbe Auswertung
-// (Artikel-Erkennung, Charge/Menge, Von->Nach im Titel) läuft dann für beide Wege unverändert.
-// ocrLines: Tesseract-Zeilen mit Wort-Boxen (r.data.lines: [{words:[{text,confidence,bbox:{x0,...}}]}]),
-// width: Bildbreite in Pixeln (für die Mindest-Lücke zwischen Spalten).
-// Idee: Spalten eines gedruckten Tabellenrasters erkennt man daran, dass die linken Kanten der Wörter
-// sich auf ein paar x-Positionen häufen, mit deutlichen Lücken dazwischen (Spaltenabstand) -- anders als
-// der enge, unregelmäßige Abstand zwischen Wörtern innerhalb einer Spalte/Zelle.
-// Tabellenlinien vor der Texterkennung entfernen: die dicken Rasterlinien der Druck-Pickliste hält Tesseract
-// sonst für Text/Blöcke und liest dann fast nichts (echtes Foto 23.09.2026: 8 von 17 Werten, ohne Linien 14).
-// rgba: ImageData.data, Ergebnis: neues RGBA-Bild, Schrift schwarz auf weiß.
 // Tinte = deutlich dunkler als die Umgebung (lokaler Mittelwert statt fester Schwelle: Schatten/Hallenlicht);
-// dunkelster Farbkanal, damit rote Überschriften genauso zählen wie schwarze Schrift.
-// Linie = Tintenlauf, der länger ist als 6 % der Bildbreite/-höhe (Buchstaben sind viel kürzer, auch leicht schräge
-// Linien ergeben noch lange Läufe), plus ein paar Pixel Rand drumherum.
-function stripTableLines(rgba, W, H) {
+// dunkelster Farbkanal, damit rote Überschriften genauso zählen wie schwarze Schrift. Ergebnis: 1 = Tinte.
+function inkMask(rgba, W, H) {
   const N = W * H, v = new Uint8Array(N);
   for (let p = 0, i = 0; p < N; p++, i += 4) v[p] = Math.min(rgba[i], rgba[i + 1], rgba[i + 2]);
-  const sum = new Float64Array((W + 1) * (H + 1)); // Integralbild für den Mittelwert im Fenster
+  const sum = new Uint32Array((W + 1) * (H + 1)); // Integralbild für den Mittelwert im Fenster (255 × 9 Mio. Pixel passt in 32 Bit, halber Speicher fürs iPhone)
   for (let y = 0; y < H; y++) { let row = 0; for (let x = 0; x < W; x++) { row += v[y * W + x]; sum[(y + 1) * (W + 1) + x + 1] = sum[y * (W + 1) + x + 1] + row; } }
   const r = Math.max(8, Math.round(W / 40)), ink = new Uint8Array(N);
   for (let y = 0; y < H; y++) {
@@ -232,19 +219,79 @@ function stripTableLines(rgba, W, H) {
       ink[y * W + x] = v[y * W + x] < mean * 0.75 ? 1 : 0;
     }
   }
-  const line = new Uint8Array(N);
-  const runs = (n, len, at) => { let s = 0; for (let k = 0; k <= n; k++) if (k === n || !ink[at(k)]) { if (k - s >= len) for (let j = s; j < k; j++) line[at(j)] = 1; s = k + 1; } };
-  for (let y = 0; y < H; y++) runs(W, Math.round(W * 0.06), x => y * W + x);
-  for (let x = 0; x < W; x++) runs(H, Math.round(H * 0.06), y => y * W + x);
-  // Linienrand (Kantenpixel) mitnehmen: Maske in beide Richtungen verbreitern
-  const g = Math.max(2, Math.round(W / 600)), tmp = new Uint8Array(N), wide = new Uint8Array(N);
-  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) if (line[y * W + x]) for (let d = Math.max(0, x - g); d <= Math.min(W - 1, x + g); d++) tmp[y * W + d] = 1;
-  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) if (tmp[y * W + x]) for (let d = Math.max(0, y - g); d <= Math.min(H - 1, y + g); d++) wide[d * W + x] = 1;
+  return ink;
+}
+
+// Schräglage des Blatts in Grad (positiv = Zeilen fallen nach rechts ab), aus einem kleinen Vorschaubild.
+// Projektionsprofil: Tinte entlang jeder Probe-Richtung auf Zeilen aufsummieren -- liegen Tabellenlinien und
+// Textzeilen genau in dieser Richtung, gibt es wenige, sehr volle Zeilen (maximale Quadratsumme).
+function skewAngle(rgba, W, H, maxDeg = 12) {
+  const ink = inkMask(rgba, W, H);
+  const pts = [];
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) if (ink[y * W + x]) pts.push(x - W / 2, y);
+  if (pts.length < 200) return 0;
+  const score = deg => {
+    const t = Math.tan(deg * Math.PI / 180), off = W / 2 * Math.abs(t) + 1, bins = new Float64Array(Math.ceil(H + 2 * off) + 1);
+    for (let i = 0; i < pts.length; i += 2) bins[Math.round(pts[i + 1] - pts[i] * t + off)]++;
+    let s = 0; for (const b of bins) s += b * b; return s;
+  };
+  let best = 0, bestS = score(0);
+  for (let d = -maxDeg; d <= maxDeg; d += 0.5) { const s = score(d); if (s > bestS) { best = d; bestS = s; } }
+  for (let d = best - 0.4; d <= best + 0.4; d += 0.1) { const s = score(d); if (s > bestS) { best = d; bestS = s; } }
+  return Math.round(best * 10) / 10;
+}
+
+// Tabellenlinien vor der Texterkennung entfernen: die dicken Rasterlinien der Druck-Pickliste hält Tesseract
+// sonst für Text/Blöcke und liest dann fast nichts (echtes Foto 23.09.2026: 8 von 17 Werten, ohne Linien 14).
+// rgba: ImageData.data, Ergebnis: neues RGBA-Bild, Schrift schwarz auf weiß.
+// Linie = Tintenlauf, der länger ist als 6 % der Bildbreite/-höhe (Buchstaben sind viel kürzer), plus ein paar
+// Pixel Rand drumherum. Stark schräge Linien (5° und mehr) zerfallen trotzdem in kurze Stufen -- deshalb dreht
+// app.js das Foto vorher mit skewAngle() gerade.
+function stripTableLines(rgba, W, H) {
+  const N = W * H, ink = inkMask(rgba, W, H);
+  const d = Math.max(2, Math.round(W / 1000)), g = Math.max(2, Math.round(W / 600));
+  // Läufe in einer quer um ±d Pixel verbreiterten Maske suchen: eine leicht schräge Linie (Rest-Schräglage,
+  // Perspektive bei nicht parallel gehaltenem Handy) bleibt so ein langer Lauf statt in kurze Stufen zu zerfallen.
+  // Als Linie zählen davon nur echte Tintenpixel, sonst radiert der Rand die erste Ziffer neben dem Strich an (9 -> 3).
+  // gap: so viele Pixel Lücke überbrückt ein Lauf (dünne Linie im JPEG mit Schatten ist löchrig).
+  const band = new Uint8Array(N), line = new Uint8Array(N);
+  const runs = (n, len, gap, at) => {
+    let s = -1, last = -1;
+    for (let k = 0; k <= n; k++) {
+      const on = k < n && band[at(k)];
+      if (on && s < 0) s = k;
+      if (s >= 0 && (k === n || (!on && k - last > gap))) {
+        if (last - s + 1 >= len) for (let j = s; j <= last; j++) line[at(j)] |= ink[at(j)];
+        s = -1;
+      }
+      if (on) last = k;
+    }
+  };
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) if (ink[y * W + x]) for (let e = Math.max(0, y - d); e <= Math.min(H - 1, y + d); e++) band[e * W + x] = 1;
+  for (let y = 0; y < H; y++) runs(W, Math.round(W * 0.06), 1, x => y * W + x);
+  band.fill(0);
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) if (ink[y * W + x]) for (let e = Math.max(0, x - d); e <= Math.min(W - 1, x + d); e++) band[y * W + e] = 1;
+  // Senkrecht Lücken überbrücken: die dünnen Innenlinien zerfielen sonst in zellenhohe Stücke, die Tesseract als
+  // "1" vor die Werte setzt ("1225 kg"). Waagrecht nicht: dort würden Buchstaben eines Worts zu einem Lauf.
+  for (let x = 0; x < W; x++) runs(H, Math.round(H * 0.06), Math.max(2, Math.round(H / 600)), y => y * W + x);
+  // Linienrand (Kantenpixel) mitnehmen: Maske in beide Richtungen um g verbreitern (band als Zwischenspeicher)
+  const wide = new Uint8Array(N);
+  band.fill(0);
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) if (line[y * W + x]) for (let e = Math.max(0, x - g); e <= Math.min(W - 1, x + g); e++) band[y * W + e] = 1;
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) if (band[y * W + x]) for (let e = Math.max(0, y - g); e <= Math.min(H - 1, y + g); e++) wide[e * W + x] = 1;
   const out = new Uint8ClampedArray(N * 4);
   for (let p = 0, i = 0; p < N; p++, i += 4) { out[i] = out[i + 1] = out[i + 2] = ink[p] && !wide[p] ? 0 : 255; out[i + 3] = 255; }
   return out;
 }
 
+// Fotografierte Pickliste (Papier statt Excel) in dasselbe Zeilen/Spalten-Raster verwandeln, das
+// parsePicklist() schon von XLSX.utils.sheet_to_json(..., {header:1}) kennt -- dieselbe Auswertung
+// (Artikel-Erkennung, Charge/Menge, Von->Nach im Titel) läuft dann für beide Wege unverändert.
+// ocrLines: Tesseract-Zeilen mit Wort-Boxen (r.data.lines: [{words:[{text,confidence,bbox:{x0,...}}]}]),
+// width: Bildbreite in Pixeln (für die Mindest-Lücke zwischen Spalten).
+// Idee: Spalten eines gedruckten Tabellenrasters erkennt man daran, dass die linken Kanten der Wörter
+// sich auf ein paar x-Positionen häufen, mit deutlichen Lücken dazwischen (Spaltenabstand) -- anders als
+// der enge, unregelmäßige Abstand zwischen Wörtern innerhalb einer Spalte/Zelle.
 function picklistGridFromWords(ocrLines, width) {
   // 1) Innerhalb jeder OCR-Zeile eng benachbarte Wörter (normaler Wortabstand) zu Textfragmenten zusammenfassen,
   //    damit ein langes erstes Wort einer Zelle das zweite nicht über dessen x0 in eine falsche Spalte schiebt.
@@ -252,11 +299,16 @@ function picklistGridFromWords(ocrLines, width) {
   const localGap = width * 0.012;
   const frags = [];
   for (const l of ocrLines) {
+    // Tabellenstrich/Anführungszeichen, die am Wort kleben ("[Artikeinummer", '"KSM-ORG-…'), gehören nicht dazu
+    const tidy = t => t.trim().replace(/^[|¦!\[\]'"`„“]+(?=[\p{L}\p{N}])/u, '').replace(/(?<=[\p{L}\p{N}.])[|¦!\[\]'"`“]+$/u, '');
     // Unsichere Wörter (Handschrift/Rauschen) fliegen raus -- außer kurzen Zahlen/"kg"/"->": die liest Tesseract im
     // echten Foto richtig, meldet aber 0-30 % ("225 kg", "75 kg", "B4 -> Bühl"). Falsches fällt über den Aufbau raus.
-    const sure = w => w.confidence >= 40 || /^([A-Za-z]?\d+([.,]\d+)?[A-Za-z]?|\d+([.,]\d+)?kg|kg|->|→)$/i.test(w.text.trim());
-    const ws = (l.words || []).filter(w => sure(w) && w.text.trim() && !/^[|¦![\]()—–_=~.,:;'"`]+$/.test(w.text.trim()))
-      .map(w => ({ text: w.text.trim(), x0: w.bbox.x0, x1: w.bbox.x1, h: w.bbox.y1 != null ? w.bbox.y1 - w.bbox.y0 : 0,
+    // Genauso Codes mit mehreren Ziffern ("KSM-ORG-25-S1432" kam mit 0 %): so etwas entsteht nicht aus Rauschen.
+    const sure = w => w.confidence >= 40 || /^([A-Za-z]?\d+([.,]\d+)?[A-Za-z]?|\d+([.,]\d+)?kg|kg|->|→)$/i.test(w.text.trim()) ||
+      /^(?=(\D*\d){2})[A-Z0-9][A-Z0-9\-./]{3,39}$/i.test(w.text.trim());
+    const ws = (l.words || []).map(w => ({ ...w, text: tidy(w.text) }))
+      .filter(w => sure(w) && w.text && !/^[|¦![\]()—–_=~.,:;'"`]+$/.test(w.text))
+      .map(w => ({ text: w.text, x0: w.bbox.x0, x1: w.bbox.x1, h: w.bbox.y1 != null ? w.bbox.y1 - w.bbox.y0 : 0,
         y: w.bbox.y1 != null ? (w.bbox.y0 + w.bbox.y1) / 2 : (l.bbox?.y0 ?? w.bbox.y0) }))
       .sort((a, b) => a.x0 - b.x0);
     let cur = null;
@@ -279,15 +331,26 @@ function picklistGridFromWords(ocrLines, width) {
   //    tiefer liegen als links (Foto 23.09.2026). Stattdessen spaltenweise von oben nach unten lesen:
   //    jede Artikelnummer startet eine Position, der n-te Wert in Charge/Menge gehört zur n-ten Position.
   const byY = (a, b) => a.y - b.y;
-  const firstTok = s => s.split(/\s+/)[0];
+  // Zellrand/Tabellenstrich vor dem ersten Zeichen ("[10006349PFL", "|91100023") gehört nicht zur Nummer
+  const firstTok = s => s.replace(/^[^\p{L}\p{N}]+/u, '').split(/\s+/)[0];
   const isArt = f => /^\d{3,}[A-Z0-9\-/.]*$/i.test(firstTok(f.text));
   const anyHead = f => /^(artikel|bezeichnung|charge|lot|menge|best|einheit|anzahl|gewicht|gebinde|produktion|logistik)/.test(normH(f.text));
   const colHead = f => /^(charge|lot|menge|einheit|anzahl|gewicht|bezeichnung|gebinde)/.test(normH(f.text));
-  // Ohne "Artikel…"-Überschrift ist es keine Pickliste (z. B. ein Etikett) -- tolerant gegen Lesefehler an den
-  // Rändern: im echten Foto kam "rtikelnummer" (A am Tabellenstrich abgeschnitten)
-  const artHead = frags.find(f => /tikel|artnr/.test(normH(f.text)));
-  if (!artHead) return [];
-  const artCol = artHead.col, headY = artHead.y;
+  // "Artikel…"-Überschrift, tolerant gegen Lesefehler: im echten Foto kam "rtikelnummer" (A am Tabellenstrich
+  // abgeschnitten), im schrägen Foto "[Artikeinummer" (l als i gelesen)
+  const artHead = frags.find(f => /rt[il1]k[ec3][il1]|tikel|artnr/.test(normH(f.text)));
+  let artCol, headY;
+  if (artHead) ({ col: artCol, y: headY } = artHead);
+  else {
+    // Überschrift gar nicht gelesen: Artikelspalte ist die linkeste Spalte mit mehreren Artikelnummern
+    // (Chargen sehen auch nach Nummern aus, stehen aber rechts davon). Unter 2 Nummern: kein Tabellenfoto.
+    const cnt = new Map();
+    for (const f of frags) if (isArt(f)) cnt.set(f.col, (cnt.get(f.col) || 0) + 1);
+    const max = Math.max(0, ...cnt.values());
+    if (max < 2) return [];
+    artCol = Math.min(...[...cnt].filter(([, n]) => n >= max / 2).map(([c]) => c));
+    headY = Math.min(...frags.filter(f => f.col === artCol && isArt(f)).map(f => f.y)) - 1;
+  }
 
   const recs = [];
   for (const f of frags.filter(f => f.col === artCol && f.y > headY).sort(byY)) {
@@ -347,6 +410,12 @@ function picklistGridFromWords(ocrLines, width) {
     const q = cols.filter(c => !c.name && c.qtyLike >= recs.length / 2).sort((a, b) => b.qtyLike - a.qtyLike)[0];
     if (q) q.name = 'Menge';
   }
+  // Genauso "Charge": die übrige Spalte, in der die meisten Positionen einen Wert mit Ziffern haben
+  if (!cols.some(c => /^(charge|lot)/.test(normH(c.name)))) {
+    const digits = c => c.main.filter(t => /\d/.test(t)).length;
+    const ch = cols.filter(c => !c.name && digits(c) >= recs.length / 2).sort((a, b) => digits(b) - digits(a))[0];
+    if (ch) ch.name = 'Charge';
+  }
   const named = cols.filter(c => c.name);
 
   const above = frags.filter(f => f.y < headY).sort((a, b) => a.y - b.y || a.x0 - b.x0);
@@ -377,4 +446,4 @@ function applyPicklist(r, codes, lines) {
   return out;
 }
 
-if (typeof module !== 'undefined') module.exports = { cleanLine, parseLabel, parsePicklist, applyPicklist, picklistGridFromWords, stripTableLines, gebindeCount, normArt, normCharge, requiredLabelColor, classifyLabelColor };
+if (typeof module !== 'undefined') module.exports = { cleanLine, parseLabel, parsePicklist, applyPicklist, picklistGridFromWords, stripTableLines, skewAngle, gebindeCount, normArt, normCharge, requiredLabelColor, classifyLabelColor };
