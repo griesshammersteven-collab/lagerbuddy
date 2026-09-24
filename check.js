@@ -34,6 +34,51 @@ test('Foto: Überschriften gar nicht gelesen -> Spalten aus dem Inhalt', () => {
   check(parsePicklist(grid, grid));
 });
 
+// Echtes Handyfoto 24.09.2026 (Standbild aus der Bildschirmaufnahme, auf 3000 px skaliert wie in der App):
+// Spalte BA-Nr. links, zweizeiliger Kopf, Werte zentriert in der Zelle, Menge "61.000" = 61 000 Stück,
+// Bezeichnung "120ml.braunglas" beginnt mit Ziffern
+const echt = require('./test/ocr-pickliste-echt.json');
+test('Echtes Foto: zentrierte Werte, BA-Nr.-Spalte, Tausenderpunkt', () => {
+  const grid = picklistGridFromWords(echt.lines, echt.width);
+  const p = parsePicklist(grid, grid);
+  assert.deepStrictEqual(p.lines.map(l => [l.artikel, l.bez, l.charge, l.required, l.einheit]),
+    [['931000136000', '120ml.braunglas', '', 61000, 'Stück']]);
+  assert.strictEqual(p.skipped, 0);
+  assert.strictEqual(p.von, 'B4'); assert.strictEqual(p.nach, 'Bühl');
+});
+
+// Dasselbe Foto als ganzer Bildschirm: OCR-Rauschen "EN" in der blauen Kopfzeile über der Artikelspalte
+const ganz = require('./test/ocr-pickliste-echt-ganz.json');
+test('Echtes Foto: Rauschen in der Kopfzeile setzt keine falsche Spaltengrenze', () => {
+  const grid = picklistGridFromWords(ganz.lines, ganz.width);
+  const p = parsePicklist(grid, grid);
+  assert.deepStrictEqual(p.lines.map(l => [l.artikel, l.bez, l.charge, l.required, l.einheit]),
+    [['931000136000', '120ml.braunglas', '', 61000, 'Stück']]);
+});
+
+// Weit weg, 5° schief, starkes JPEG: "‘Charge" kam mit 32 % Sicherheit -- ohne diese Überschrift begann die
+// Charge-Spalte erst bei "/Lot" und die Chargen rutschten in die Artikelspalte
+const weit = require('./test/ocr-pickliste-weit.json');
+test('Foto weit weg: unsichere Überschrift bestimmt trotzdem die Spalte', () => {
+  const grid = picklistGridFromWords(weit.lines, weit.width);
+  const p = parsePicklist(grid, grid);
+  const byArt = Object.fromEntries(p.lines.map(l => [l.artikel + '/' + l.required, l.charge]));
+  assert.strictEqual(byArt['10006349PFL/225'], '1446028');
+  assert.strictEqual(byArt['10006349PFL/75'], '1446031');
+  assert.strictEqual(byArt['91000451/24'], '500912');
+  assert.ok(!p.lines.some(l => /^\d{6,7}$/.test(l.artikel) && l.artikel.startsWith('14')), 'keine Charge als Artikelnummer');
+});
+
+test('Mengen: deutscher Tausenderpunkt und Dezimalkomma', () => {
+  const q = t => parsePicklist([['Artikelnummer', 'Menge'], ['91100023', t]]).lines[0].required;
+  assert.deepStrictEqual(['61.000', '1.250,5', '12,5', '12.5', '8 kg', '24'].map(q), [61000, 1250.5, 12.5, 12.5, 8, 24]);
+});
+
+test('Bezeichnung mit Ziffern vorne ("120ml.braunglas") ist keine Artikelnummer', () => {
+  const p = parsePicklist([['Artikelnummer', 'Menge'], ['931000136000', '5'], ['120ml.braunglas', ''], ['250 g Dose', '']]);
+  assert.deepStrictEqual(p.lines.map(l => [l.artikel, l.bez]), [['931000136000', '120ml.braunglas']]);
+});
+
 test('Foto ohne Tabelle (z. B. Etikett) -> keine Pickliste', () => {
   const lines = [{ words: [{ text: 'Kakaobutter', confidence: 90, bbox: { x0: 10, y0: 10, x1: 200, y1: 40 } }] },
     { words: [{ text: '10006349', confidence: 90, bbox: { x0: 10, y0: 60, x1: 200, y1: 90 } }] }];

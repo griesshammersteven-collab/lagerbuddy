@@ -119,12 +119,20 @@ const pickErr = m => Object.assign(new Error(m), { userMessage: true }); // erwa
 const normArt = s => String(s ?? '').toUpperCase().replace(/\s+/g, '');
 const normCharge = s => normArt(s).replace(/^0+(?=.)/, ''); // "0001446028" == "1446028"
 
-// Menge aus Zelle lesen: echte Zahl oder Text wie "8 kg" / "12,5" / "24 Stk".
+// Menge aus Zelle lesen: echte Zahl oder Text wie "8 kg" / "12,5" / "24 Stk" / "61.000".
+// Punkt mit genau drei Ziffern dahinter ist der deutsche Tausenderpunkt (echte Pickliste: "61.000" = 61 000 Stück),
+// "12.5" bleibt 12,5. Führende 0 ("0.500") zählt nicht als Tausender.
 function parseQty(raw, text) {
   if (typeof raw === 'number') return { n: raw, kg: /kg/i.test(text) };
-  const m = String(raw ?? '').match(/(\d+(?:[.,]\d+)?)\s*(kg)?/i);
-  return m ? { n: parseFloat(m[1].replace(',', '.')), kg: !!m[2] } : null;
+  const m = String(raw ?? '').match(/([1-9]\d{0,2}(?:\.\d{3})+(?:,\d+)?|\d+(?:[.,]\d+)?)\s*(kg)?/i);
+  if (!m) return null;
+  const t = /^[1-9]\d{0,2}(\.\d{3})+(,\d+)?$/.test(m[1]) ? m[1].replace(/\./g, '') : m[1];
+  return { n: parseFloat(t.replace(',', '.')), kg: !!m[2] };
 }
+
+// Artikelnummer: beginnt mit mind. 3 Ziffern ("10006349PFL", "931000136000"). Aber nicht, wenn auf die Ziffern
+// eine Einheit folgt -- dann ist es eine Bezeichnung ("120ml.braunglas", "250 g Dose").
+const isArticleNo = s => /^\d{3,}[A-Z0-9\-/.]*$/i.test(s) && !/^\d+(?:[.,]\d+)?\s*(?:ml|cl|l|mg|g|kg|mm|cm|m|stk|st|x)(?![a-zäöü])/i.test(s);
 
 // raw/fmt: XLSX.utils.sheet_to_json(sheet, {header:1, defval:''}) einmal mit raw:true, einmal raw:false
 // (formatierter Text behält "8 kg" und führende Nullen bei als Zahl gespeicherten Chargen).
@@ -165,7 +173,7 @@ function parsePicklist(raw, fmt = raw) {
     }
     return null;
   };
-  const isArticle = s => /^\d{3,}[A-Z0-9\-/.]*$/i.test(s);
+  const isArticle = isArticleNo;
   const isHeader = s => /^(bezeichnung|artikel|charge|lot|menge|best|einheit|anzahl|gewicht|produktion|logistik)/.test(normH(s));
 
   const lines = [];
@@ -300,12 +308,15 @@ function picklistGridFromWords(ocrLines, width) {
   const frags = [];
   for (const l of ocrLines) {
     // Tabellenstrich/Anführungszeichen, die am Wort kleben ("[Artikeinummer", '"KSM-ORG-…'), gehören nicht dazu
-    const tidy = t => t.trim().replace(/^[|¦!\[\]'"`„“]+(?=[\p{L}\p{N}])/u, '').replace(/(?<=[\p{L}\p{N}.])[|¦!\[\]'"`“]+$/u, '');
+    const tidy = t => t.trim().replace(/^[|¦!\[\]'"`„“‘’‚]+(?=[\p{L}\p{N}])/u, '').replace(/(?<=[\p{L}\p{N}.])[|¦!\[\]'"`“‘’]+$/u, '');
     // Unsichere Wörter (Handschrift/Rauschen) fliegen raus -- außer kurzen Zahlen/"kg"/"->": die liest Tesseract im
     // echten Foto richtig, meldet aber 0-30 % ("225 kg", "75 kg", "B4 -> Bühl"). Falsches fällt über den Aufbau raus.
     // Genauso Codes mit mehreren Ziffern ("KSM-ORG-25-S1432" kam mit 0 %): so etwas entsteht nicht aus Rauschen.
+    // Und Spaltenüberschriften: aus ihnen werden die Spaltengrenzen (Foto: "‘Charge" mit 32 % -> ohne sie rutschten
+    // die Chargen in die Artikelspalte).
     const sure = w => w.confidence >= 40 || /^([A-Za-z]?\d+([.,]\d+)?[A-Za-z]?|\d+([.,]\d+)?kg|kg|->|→)$/i.test(w.text.trim()) ||
-      /^(?=(\D*\d){2})[A-Z0-9][A-Z0-9\-./]{3,39}$/i.test(w.text.trim());
+      /^(?=(\D*\d){2})[A-Z0-9][A-Z0-9\-./]{3,39}$/i.test(w.text.trim()) ||
+      /^(artikel|bezeichnung|charge|lot|menge|best|anzahl|gewicht|einheit|gebinde)/.test(normH(w.text));
     const ws = (l.words || []).map(w => ({ ...w, text: tidy(w.text) }))
       .filter(w => sure(w) && w.text && !/^[|¦![\]()—–_=~.,:;'"`]+$/.test(w.text))
       .map(w => ({ text: w.text, x0: w.bbox.x0, x1: w.bbox.x1, h: w.bbox.y1 != null ? w.bbox.y1 - w.bbox.y0 : 0,
@@ -314,47 +325,73 @@ function picklistGridFromWords(ocrLines, width) {
     let cur = null;
     for (const w of ws) {
       // große Schrift (Titel "B4 -> Bühl") hat größere Wortabstände: Grenze wächst mit der Schrifthöhe mit
-      if (cur && w.x0 - cur.x1 <= Math.max(localGap, 0.8 * w.h)) { cur.text += ' ' + w.text; cur.x1 = w.x1; cur.ys.push(w.y); }
-      else { cur = { text: w.text, x0: w.x0, x1: w.x1, ys: [w.y] }; frags.push(cur); }
+      if (cur && w.x0 - cur.x1 <= Math.max(localGap, 0.8 * w.h)) { cur.text += ' ' + w.text; cur.x1 = w.x1; cur.ys.push(w.y); cur.h = Math.max(cur.h, w.h); }
+      else { cur = { text: w.text, x0: w.x0, x1: w.x1, ys: [w.y], h: w.h }; frags.push(cur); }
     }
   }
   if (!frags.length) return [];
   for (const f of frags) f.y = f.ys.reduce((s, y) => s + y, 0) / f.ys.length;
 
-  // 2) Spalten: die linken Kanten häufen sich auf ein paar x-Positionen, mit deutlich größerer Lücke dazwischen.
-  const xs = frags.map(f => f.x0).sort((a, b) => a - b);
-  const bounds = [];
-  for (let i = 1; i < xs.length; i++) if (xs[i] - xs[i - 1] > width * 0.05) bounds.push((xs[i] + xs[i - 1]) / 2);
-  for (const f of frags) f.col = bounds.filter(b => b < f.x0).length;
-
-  // 3) Zeilen NICHT über die Höhe bilden: ein schräg gehaltenes Handy lässt rechte Spalten eine halbe Zeile
-  //    tiefer liegen als links (Foto 23.09.2026). Stattdessen spaltenweise von oben nach unten lesen:
-  //    jede Artikelnummer startet eine Position, der n-te Wert in Charge/Menge gehört zur n-ten Position.
   const byY = (a, b) => a.y - b.y;
   // Zellrand/Tabellenstrich vor dem ersten Zeichen ("[10006349PFL", "|91100023") gehört nicht zur Nummer
   const firstTok = s => s.replace(/^[^\p{L}\p{N}]+/u, '').split(/\s+/)[0];
-  const isArt = f => /^\d{3,}[A-Z0-9\-/.]*$/i.test(firstTok(f.text));
+  const isArt = f => isArticleNo(firstTok(f.text));
   const anyHead = f => /^(artikel|bezeichnung|charge|lot|menge|best|einheit|anzahl|gewicht|gebinde|produktion|logistik)/.test(normH(f.text));
   const colHead = f => /^(charge|lot|menge|einheit|anzahl|gewicht|bezeichnung|gebinde)/.test(normH(f.text));
   // "Artikel…"-Überschrift, tolerant gegen Lesefehler: im echten Foto kam "rtikelnummer" (A am Tabellenstrich
   // abgeschnitten), im schrägen Foto "[Artikeinummer" (l als i gelesen)
   const artHead = frags.find(f => /rt[il1]k[ec3][il1]|tikel|artnr/.test(normH(f.text)));
+
+  // 2) Spalten. Mit gelesener Kopfzeile: Die Überschriften stehen links in ihren Zellen, ihre linken Kanten sind
+  //    also die Zellgrenzen; jeder Wert gehört in die Spalte, in der seine MITTE liegt -- egal ob er links, zentriert
+  //    oder rechts in der Zelle steht. (Echtes Foto 24.09.2026: "Artikelnummer" bei x581, die zentrierte Nummer
+  //    darunter bei x748 -- über die linken Kanten landete sie in einer eigenen Spalte, null Positionen.)
+  //    Kopfbereich = von knapp über der Artikel-Überschrift (mehrzeilige Köpfe: "Produktion / Artikelnummer /
+  //    Bezeichnung") bis vor die erste Artikelnummer.
+  let starts = null;
+  if (artHead) {
+    const h = artHead.h || width * 0.015;
+    const firstArtY = Math.min(Infinity, ...frags.filter(f => f.y > artHead.y + h / 2 && isArt(f)).map(f => f.y));
+    // nur echte Überschriften (mind. 4 Buchstaben: "Menge", "BA-Nr.", "best."), kein Rauschen aus der farbigen
+    // Kopfzeile -- ein Fetzen "EN" mitten über der Artikelspalte setzte sonst eine falsche Grenze
+    const zone = frags.filter(f => f.y >= artHead.y - 3 * h && f.y < firstArtY - h / 2 && (f.text.match(/\p{L}/gu) || []).length >= 4)
+      .sort((a, b) => a.x0 - b.x0);
+    const s = [];
+    let last = -Infinity;
+    for (const f of zone) { if (f.x0 - last > width * 0.025) s.push(f.x0); last = f.x0; }
+    if (s.length >= 2) starts = s;
+  }
+  if (starts) {
+    const tol = width * 0.01;
+    for (const f of frags) f.col = starts.filter(x => x - tol <= (f.x0 + f.x1) / 2).length - 1;
+  } else {
+    // Ohne Kopfzeile: die linken Kanten häufen sich auf ein paar x-Positionen, mit deutlich größerer Lücke dazwischen.
+    const xs = frags.map(f => f.x0).sort((a, b) => a - b);
+    const bounds = [];
+    for (let i = 1; i < xs.length; i++) if (xs[i] - xs[i - 1] > width * 0.05) bounds.push((xs[i] + xs[i - 1]) / 2);
+    for (const f of frags) f.col = bounds.filter(b => b < f.x0).length;
+  }
+
+  // 3) Zeilen NICHT über die Höhe bilden: ein schräg gehaltenes Handy lässt rechte Spalten eine halbe Zeile
+  //    tiefer liegen als links (Foto 23.09.2026). Stattdessen spaltenweise von oben nach unten lesen:
+  //    jede Artikelnummer startet eine Position, der n-te Wert in Charge/Menge gehört zur n-ten Position.
   let artCol, headY;
   if (artHead) ({ col: artCol, y: headY } = artHead);
   else {
-    // Überschrift gar nicht gelesen: Artikelspalte ist die linkeste Spalte mit mehreren Artikelnummern
-    // (Chargen sehen auch nach Nummern aus, stehen aber rechts davon). Unter 2 Nummern: kein Tabellenfoto.
+    // Überschrift gar nicht gelesen: Artikelspalte ist die Spalte mit mehreren Artikelnummern; stehen in mehreren
+    // Spalten Nummern (Chargen, BA-Nr./Kunde), gewinnt die mit den längsten -- Artikelnummern haben 8-12 Stellen.
+    // Unter 2 Nummern: kein Tabellenfoto.
     const cnt = new Map();
-    for (const f of frags) if (isArt(f)) cnt.set(f.col, (cnt.get(f.col) || 0) + 1);
-    const max = Math.max(0, ...cnt.values());
+    for (const f of frags) if (isArt(f)) { const c = cnt.get(f.col) || { n: 0, len: 0 }; c.n++; c.len += firstTok(f.text).length; cnt.set(f.col, c); }
+    const max = Math.max(0, ...[...cnt.values()].map(c => c.n));
     if (max < 2) return [];
-    artCol = Math.min(...[...cnt].filter(([, n]) => n >= max / 2).map(([c]) => c));
+    artCol = [...cnt].filter(([, c]) => c.n >= max / 2).sort(([ca, a], [cb, b]) => b.len / b.n - a.len / a.n || ca - cb)[0][0];
     headY = Math.min(...frags.filter(f => f.col === artCol && isArt(f)).map(f => f.y)) - 1;
   }
 
   const recs = [];
   for (const f of frags.filter(f => f.col === artCol && f.y > headY).sort(byY)) {
-    if (isArt(f)) recs.push({ y: f.y, art: firstTok(f.text), bez: [] });
+    if (isArt(f)) recs.push({ y: f.y, h: f.h, art: firstTok(f.text), bez: [] });
     else if (recs.length && !anyHead(f)) recs.at(-1).bez.push(f.text);
   }
   // Erstes Zeichen am Zellrand verschluckt ("10006349PFL"), dieselbe Nummer steht aber vollständig in einer anderen
@@ -368,8 +405,10 @@ function picklistGridFromWords(ocrLines, width) {
   const firstY = recs.length ? recs[0].y : Infinity;
   const heads = frags.filter(f => f.col !== artCol && colHead(f) && f.y < firstY);
   const groups = new Map();
+  // Werte erst ab der ersten Artikelzeile: darüber stehen noch Kopfzeilen anderer Spalten ("BA-Nr. / Kunde", "best.")
+  const valFrom = recs.length ? firstY - 0.8 * (artHead?.h || recs[0].h || 0) : headY;
   for (const f of frags) {
-    if (f.col === artCol || f.y <= headY || anyHead(f)) continue;
+    if (f.col === artCol || f.y <= headY || f.y < valFrom || anyHead(f)) continue;
     if (!groups.has(f.col)) groups.set(f.col, []);
     groups.get(f.col).push(f);
   }
@@ -405,13 +444,16 @@ function picklistGridFromWords(ocrLines, width) {
     }
     cols.push({ name: head ? head.text : '', main, second, qtyLike: vals.filter(f => /^\d+([.,]\d+)?\s*(kg|stk|stück)?\.?$/i.test(f.text)).length });
   }
-  // Überschrift "Menge" nicht gelesen? Dann ist es die Spalte, die fast nur aus Mengen besteht.
-  if (!cols.some(c => /^(menge|anzahl|gewicht)/.test(normH(c.name)))) {
+  // Überschrift "Menge" nicht gelesen? Dann ist es die Spalte, die fast nur aus Mengen besteht. Nur wenn es die
+  // Überschrift wirklich nicht gibt -- eine gelesene, aber leere Spalte bleibt leer.
+  const hasHead = re => heads.some(h => re.test(normH(h.text)));
+  if (!cols.some(c => /^(menge|anzahl|gewicht)/.test(normH(c.name))) && !hasHead(/^(menge|anzahl|gewicht)/)) {
     const q = cols.filter(c => !c.name && c.qtyLike >= recs.length / 2).sort((a, b) => b.qtyLike - a.qtyLike)[0];
     if (q) q.name = 'Menge';
   }
-  // Genauso "Charge": die übrige Spalte, in der die meisten Positionen einen Wert mit Ziffern haben
-  if (!cols.some(c => /^(charge|lot)/.test(normH(c.name)))) {
+  // Genauso "Charge": die übrige Spalte, in der die meisten Positionen einen Wert mit Ziffern haben. Steht "Charge"
+  // im Kopf, die Spalte ist aber leer, bleibt die Charge leer (echtes Foto: sonst wäre die BA-Nr. die Charge).
+  if (!cols.some(c => /^(charge|lot)/.test(normH(c.name))) && !hasHead(/^(charge|lot)/)) {
     const digits = c => c.main.filter(t => /\d/.test(t)).length;
     const ch = cols.filter(c => !c.name && digits(c) >= recs.length / 2).sort((a, b) => digits(b) - digits(a))[0];
     if (ch) ch.name = 'Charge';
