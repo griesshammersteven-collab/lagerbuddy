@@ -2,7 +2,7 @@
 /* LagerBuddy: Etikett fotografieren -> Barcodes + Text lokal auf dem Handy lesen -> Liste -> Excel.
    Alle Bibliotheken liegen in vendor/, kein Foto verlässt das Gerät. Nur Picklisten (Positionen, Zuteilung,
    Buchungen) werden über Supabase zwischen den Handys abgeglichen, wenn SYNC unten eingerichtet ist. */
-const APP_VERSION = '2026-09-24.7'; // bei JEDER Veröffentlichung erhöhen, genauso wie ?v= in index.html
+const APP_VERSION = '2026-09-24.8'; // bei JEDER Veröffentlichung erhöhen, genauso wie ?v= in index.html
 // Alte index.html (CDN/Offline-Speicher) mit neuerem app.js-Inhalt: dann fehlen Knöpfe und der Start bricht ab.
 // Einmal frisch laden (eindeutige URL geht am CDN vorbei), bevor irgendetwas verdrahtet wird.
 {
@@ -18,6 +18,7 @@ const KEY_PICK = 'lagerbuddy_pick_v1'; // alt: genau eine Pickliste
 const KEY_PICKS = 'lagerbuddy_picks_v1'; // alt: mehrere Picklisten, nur auf diesem Handy
 const KEY_SYNC = 'lagerbuddy_picks_v2'; // { base, pending, seit }, siehe "Abgleich" unten
 const KEY_LAGER = 'lagerbuddy_lager'; // Lager-Code dieses Handys (einmal eingeben)
+const KEY_GEBINDE = 'lagerbuddy_gebinde_v1'; // gemerkte Menge/Einheit je Artikel: { ARTIKEL: { menge, einheit, ts } }
 // Supabase-Projekt, über das die Handys ihre Picklisten abgleichen (Einrichtung: supabase/ANLEITUNG.md).
 // Der Schlüssel ist der öffentliche "publishable"/"anon"-Schlüssel -- geschützt wird über den Lager-Code.
 // Leer = kein Abgleich, Picklisten bleiben nur auf diesem Handy.
@@ -513,14 +514,21 @@ function addPick(e) {
   if (scanned && picks.some(p => p.lines.some(l => l.scans.some(x => x.fp === scanned.fp)))) {
     toast('Dieses Foto wurde schon gebucht. Jedes Gebinde einzeln fotografieren.'); return;
   }
-  // Gebindegröße bekannt (aus Liste oder von Hand eingetragen) und Menge weicht ab -> vermutlich falsches/angebrochenes
-  // Gebinde erwischt oder vertippt, lieber einmal nachfragen statt stillschweigend falsch buchen
-  if (line.gebinde && Math.abs(e.menge - line.gebinde) > 0.001 &&
-      !confirm(`Falsche Menge? Ein Gebinde hat laut Liste ${fmtN(line.gebinde)} ${line.einheit}, erfasst wurden ${fmtN(e.menge)} ${e.einheit}. Trotzdem buchen?`)) return;
+  // Gebindegröße bekannt und Menge weicht ab -> Anbruch oder vertippt: einmal nachfragen statt stillschweigend buchen.
+  // Nicht beim letzten Gebinde, wenn genau der vorgeschlagene Rest der Position gebucht wird.
+  const rest = Math.round((line.required - line.picked) * 1000) / 1000;
+  const istRest = e.menge < line.gebinde && Math.abs(e.menge - rest) < 0.001;
+  if (line.gebinde && Math.abs(e.menge - line.gebinde) > 0.001 && !istRest &&
+      !confirm(e.menge < line.gebinde
+        ? `Anbruch buchen? Ein volles Gebinde hat ${fmtN(line.gebinde)} ${line.einheit}, gebucht werden ${fmtN(e.menge)} ${e.einheit}.`
+        : `Mehr als ein Gebinde? Ein Gebinde hat ${fmtN(line.gebinde)} ${line.einheit}, erfasst wurden ${fmtN(e.menge)} ${e.einheit}. Trotzdem buchen?`)) return;
   const scan = { ts: e.ts, menge: e.menge, charge: e.charge, picker: e.picker, ...(scanned ? { fp: scanned.fp } : {}), ...(manuell ? { manuell: true } : {}) };
   if (!commit(pick.id, { t: 'scan', lid: line.lid, scan })) return;
-  // Gebindegröße noch unbekannt: das erste gescannte Gebinde legt sie fest, ab dann gilt "ein Scan = ein Gebinde"
-  if (!line.gebinde && !manuell) commit(pick.id, { t: 'feld', lid: line.lid, key: 'gebinde', v: e.menge });
+  // Gebindegröße noch unbekannt: das erste gescannte Gebinde legt sie fest, ab dann gilt "ein Scan = ein Gebinde".
+  // War eine Größe gemerkt (anderes Handy/andere Liste) und das erste Gebinde ist ein Anbruch, gilt die gemerkte.
+  const vollGeb = formVorschlag?.geb && e.menge <= formVorschlag.geb ? formVorschlag.geb : e.menge;
+  if (!line.gebinde && !manuell) commit(pick.id, { t: 'feld', lid: line.lid, key: 'gebinde', v: vollGeb });
+  if (!manuell) merken(line.artikel, line.gebinde || vollGeb, line.einheit);
   const l = pick.lines.find(x => x.lid === line.lid);
   renderPick(); closeForm();
   toast(l.picked >= l.required
@@ -679,6 +687,74 @@ $('pickClear').onclick = () => {
 };
 
 /* ---------- Formular ---------- */
+/* ---------- Menge pro Gebinde merken ---------- */
+// Beim Scannen soll nur noch "Gebinde buchen" getippt werden: Menge und Einheit kommen aus dem Gedächtnis und
+// müssen nur bei einem Anbruch geändert werden. Quellen, in dieser Reihenfolge:
+//  1. Pickliste: Gebindegröße der Position (gleicht sich über alle Handys ab), Einheit immer aus der Liste
+//  2. dieses Handy: zuletzt gebuchtes volles Gebinde des Artikels (auch im Modus "Erfassen")
+//  3. andere Picklisten mit demselben Artikel (kommen über den Abgleich von den anderen Handys)
+// Letztes Gebinde einer Position: ist der Rest kleiner als ein Gebinde, wird der Rest vorgeschlagen.
+function loadGebinde() { try { const v = JSON.parse(localStorage.getItem(KEY_GEBINDE)); return v && typeof v === 'object' ? v : {}; } catch { return {}; } }
+let gebindeMem = loadGebinde();
+function gemerkt(artikel, einheit) {
+  const a = normArt(artikel);
+  if (!a) return null;
+  const m = gebindeMem[a];
+  if (m && m.menge > 0 && (!einheit || m.einheit === einheit)) return m;
+  const aus = picks.flatMap(p => p.lines.filter(l => normArt(l.artikel) === a && l.gebinde > 0 && (!einheit || l.einheit === einheit))
+    .map(l => ({ menge: l.gebinde, einheit: l.einheit, ts: p.importedAt || 0 }))).sort((x, y) => y.ts - x.ts)[0];
+  return aus || null;
+}
+// Nur volle Gebinde merken: ein Anbruch (weniger als die gemerkte Größe) überschreibt nichts
+function merken(artikel, menge, einheit) {
+  const a = normArt(artikel), alt = gebindeMem[a];
+  if (!a || !(menge > 0) || (alt && alt.einheit === einheit && menge < alt.menge - 0.001)) return;
+  gebindeMem[a] = { menge, einheit, ts: Date.now() };
+  try { localStorage.setItem(KEY_GEBINDE, JSON.stringify(gebindeMem)); } catch {}
+}
+// { menge?, einheit, geb?, quelle: 'gebinde' | 'rest' | 'gemerkt' } oder null
+function mengeVorschlag(artikel) {
+  const a = normArt(artikel);
+  if (!a) return null;
+  if (mode === 'pick' && pick) {
+    const cur = currentPickLine();
+    const l = cur && normArt(cur.artikel) === a ? cur : pick.lines.find(x => normArt(x.artikel) === a && x.picked < x.required);
+    if (l) {
+      const geb = l.gebinde || gemerkt(a, l.einheit)?.menge;
+      if (!geb) return { einheit: l.einheit };
+      const rest = Math.round((l.required - l.picked) * 1000) / 1000;
+      return rest > 0 && rest < geb - 0.001 ? { menge: rest, einheit: l.einheit, geb, quelle: 'rest' } : { menge: geb, einheit: l.einheit, geb, quelle: 'gebinde' };
+    }
+  }
+  const m = gemerkt(a);
+  return m ? { menge: m.menge, einheit: m.einheit, geb: m.menge, quelle: 'gemerkt' } : null;
+}
+let formVorschlag = null, mengeVonHand = false;
+function fillMenge(r) {
+  formVorschlag = mengeVorschlag(r.artikel);
+  const v = formVorschlag;
+  const menge = typeof r.menge === 'number' ? r.menge : v?.menge;
+  $('menge').value = menge > 0 ? String(menge).replace('.', ',') : '';
+  const einheit = r.einheit || v?.einheit;
+  for (const el of document.getElementsByName('einheit')) el.checked = el.value === einheit;
+  mengeVonHand = false;
+  renderMengeTag();
+}
+function renderMengeTag() {
+  const v = formVorschlag, t = $('t-menge'), m = parseFloat($('menge').value.trim().replace(',', '.'));
+  let cls = '', txt = '';
+  if (v?.geb && m > 0) {
+    if (v.quelle === 'rest' && Math.abs(m - v.menge) < 0.001) { cls = 'check'; txt = 'Rest der Position'; }
+    else if (Math.abs(m - v.geb) < 0.001) { cls = 'ok'; txt = 'gemerkt'; }
+    else if (m < v.geb) { cls = 'check'; txt = `Anbruch · voll: ${fmtN(v.geb)}`; }
+    else { cls = 'check'; txt = `mehr als 1 Gebinde (${fmtN(v.geb)})`; }
+  }
+  t.className = 'tag ' + cls; t.textContent = txt;
+}
+$('menge').addEventListener('input', () => { mengeVonHand = true; renderMengeTag(); });
+// Artikelnummer von Hand eingetippt/korrigiert: Vorschlag nachziehen, solange die Menge nicht selbst geändert wurde
+$('artikel').addEventListener('input', () => { if (!mengeVonHand && editIdx === null) fillMenge({ artikel: $('artikel').value }); });
+
 // Herkunft des Formulars: Etikett-Foto (mit/ohne erkannten Artikel-Barcode, Fingerabdruck der Datei) oder von Hand
 let formScan = null;
 function showForm(r, file, idx = null) {
@@ -697,8 +773,13 @@ function showForm(r, file, idx = null) {
   }
   formHasPhoto = !!file; formLabelColor = file ? r.labelColor || null : null;
   renderLabelCheck();
-  $('menge').value = typeof r.menge === 'number' ? String(r.menge).replace('.', ',') : '';
-  for (const el of document.getElementsByName('einheit')) el.checked = el.value === r.einheit;
+  if (idx === null) fillMenge(r);
+  else { // Eintrag bearbeiten: gespeicherte Werte zeigen, nichts vorschlagen
+    formVorschlag = null; mengeVonHand = true;
+    $('menge').value = typeof r.menge === 'number' ? String(r.menge).replace('.', ',') : '';
+    for (const el of document.getElementsByName('einheit')) el.checked = el.value === r.einheit;
+    renderMengeTag();
+  }
   $('lagerplatz').value = r.lagerplatz || (mode === 'pick' && pick ? [pick.von, pick.nach].filter(Boolean).join(' → ') : '');
   if (previewUrl) URL.revokeObjectURL(previewUrl);
   previewUrl = file ? URL.createObjectURL(file) : null;
@@ -745,6 +826,7 @@ $('form').onsubmit = ev => {
   }
   list.push(e);
   if (!save()) { list.pop(); return; }
+  merken(e.artikel, e.menge, e.einheit);
   render(); closeForm(); toast('Hinzugefügt.');
 };
 $('cancel').onclick = closeForm;
