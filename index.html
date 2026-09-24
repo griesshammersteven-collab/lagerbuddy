@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'sha256-kEMYfl8Qmiw5IyLyW6MjmUn1FqfmMQ99npMfyhRJhU8='; img-src 'self' blob:; connect-src 'self' blob: data: https://*.supabase.co; worker-src 'self' blob:; manifest-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'sha256-rzq+XuSvOV5G9Ykm0fm3+vwsLmH6gUzc4usuSQqZHPA='; img-src 'self' blob:; connect-src 'self' blob: data: https://*.supabase.co; worker-src 'self' blob:; manifest-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'">
 <meta name="referrer" content="no-referrer">
 <meta name="theme-color" content="#0B4F82">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -102,6 +102,7 @@ h2{font-size:15px;color:var(--mute);font-weight:600;margin:24px 0 8px;text-trans
 .gate-lead{color:var(--mute);font-size:13px;font-weight:600;text-transform:uppercase;letter-spacing:.6px;margin:22px 0 8px}
 .gate-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(76px,1fr));gap:10px}
 .gate-master svg{width:16px;height:16px}
+.gate-upd{margin-bottom:18px}
 .gate-master.active{border-color:var(--green);background:#22b84a33}
 .tl-form{margin-top:12px}
 .tl-form label{display:block;color:var(--mute);font-size:13px;margin-bottom:4px}
@@ -129,6 +130,7 @@ h2{font-size:15px;color:var(--mute);font-weight:600;margin:24px 0 8px;text-trans
 <body>
 <div class="gate" id="gate">
   <div class="gate-card">
+    <button class="btn primary gate-upd" type="button" id="gateUpd" hidden>Neue Version verfügbar – jetzt aktualisieren</button>
     <h1>Lager<span>Buddy</span></h1>
     <form id="lagerForm" hidden autocomplete="off">
       <p class="gate-lead">Handy einrichten</p>
@@ -262,8 +264,8 @@ h2{font-size:15px;color:var(--mute);font-weight:600;margin:24px 0 8px;text-trans
 </div>
 <div id="toast" role="status" aria-live="polite"></div>
 
-<script src="parse.js?v=2026-09-24.9"></script>
-<script src="picks.js?v=2026-09-24.9"></script>
-<script src="app.js?v=2026-09-24.9"></script>
+<script src="parse.js?v=2026-09-24.10"></script>
+<script src="picks.js?v=2026-09-24.10"></script>
+<script src="app.js?v=2026-09-24.10"></script>
 </body>
 </html>

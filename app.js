@@ -2,7 +2,7 @@
 /* LagerBuddy: Etikett fotografieren -> Barcodes + Text lokal auf dem Handy lesen -> Liste -> Excel.
    Alle Bibliotheken liegen in vendor/, kein Foto verlässt das Gerät. Nur Picklisten (Positionen, Zuteilung,
    Buchungen) werden über Supabase zwischen den Handys abgeglichen, wenn SYNC unten eingerichtet ist. */
-const APP_VERSION = '2026-09-24.9'; // bei JEDER Veröffentlichung erhöhen, genauso wie ?v= in index.html
+const APP_VERSION = '2026-09-24.10'; // bei JEDER Veröffentlichung erhöhen, genauso wie ?v= in index.html
 // Alte index.html (CDN/Offline-Speicher) mit neuerem app.js-Inhalt: dann fehlen Knöpfe und der Start bricht ab.
 // Einmal frisch laden (eindeutige URL geht am CDN vorbei), bevor irgendetwas verdrahtet wird.
 {
@@ -1037,7 +1037,8 @@ async function checkUpdate() {
     const r = await fetch('index.html?nocache=' + Date.now(), { cache: 'no-store' });
     if (!r.ok) return;
     const v = ((await r.text()).match(/app\.js\?v=([\w.-]+)/) || [])[1];
-    if (v && v !== APP_VERSION) $('update').hidden = false;
+    // auch auf dem Anmeldebildschirm zeigen: der liegt über allem, der Hinweis in der App war dahinter unsichtbar
+    if (v && v !== APP_VERSION) $('update').hidden = $('gateUpd').hidden = false;
   } catch {}
 }
 async function applyUpdate() {
@@ -1054,7 +1055,7 @@ async function applyUpdate() {
   } catch {}
   location.reload();
 }
-$('updBtn').onclick = applyUpdate;
+$('updBtn').onclick = $('gateUpd').onclick = applyUpdate;
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') setTimeout(checkUpdate, 1500); });
 $('ver').textContent = 'v' + APP_VERSION;
 if ('serviceWorker' in navigator && /^https?:$/.test(location.protocol)) navigator.serviceWorker.register('sw.js').catch(() => {});
