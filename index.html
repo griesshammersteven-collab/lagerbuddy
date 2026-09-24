@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'sha256-5rk4h6uE7b+VyJxeRNcCDrdvWayCoAbZB8rUDicoikw='; img-src 'self' blob:; connect-src 'self' blob: data: https://*.supabase.co; worker-src 'self' blob:; manifest-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'sha256-I1U+JcJX13zl0fncf60IbYN6i4AxoEptweASgwYHtMc='; img-src 'self' blob:; connect-src 'self' blob: data: https://*.supabase.co; worker-src 'self' blob:; manifest-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'">
 <meta name="referrer" content="no-referrer">
 <meta name="theme-color" content="#0B4F82">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -83,6 +83,9 @@ h2{font-size:15px;color:var(--mute);font-weight:600;margin:24px 0 8px;text-trans
 .f input:focus{outline:2px solid var(--green);border-color:transparent}
 .f input[readonly]{opacity:.7}
 .pick-count{font-weight:600}
+.anz{display:grid;grid-template-columns:48px 72px 48px 1fr;gap:8px}
+.anz input{text-align:center;padding:10px 4px}
+.anz .btn{padding:0 8px}
 .tag{font-size:12px;font-weight:600;padding:2px 8px;border-radius:99px}
 .tag:empty{display:none}
 .label-check{padding:10px 12px;border-radius:10px;font-weight:600;font-size:15px;border:1px solid var(--line)}
@@ -198,6 +201,15 @@ h2{font-size:15px;color:var(--mute);font-weight:600;margin:24px 0 8px;text-trans
       <label class="btn"><input class="file" type="radio" name="einheit" value="Stück"> Stück</label>
       <label class="btn"><input class="file" type="radio" name="einheit" value="kg"> kg</label>
     </div>
+    <div class="f" id="anzahlRow" hidden>
+      <label for="anzahl">Anzahl gleicher Gebinde <span class="tag" id="t-anzahl"></span></label>
+      <div class="anz">
+        <button class="btn" type="button" id="anzMinus" aria-label="Ein Gebinde weniger">−</button>
+        <input id="anzahl" type="text" inputmode="numeric" value="1" maxlength="4" aria-label="Anzahl gleicher Gebinde">
+        <button class="btn" type="button" id="anzPlus" aria-label="Ein Gebinde mehr">+</button>
+        <button class="btn" type="button" id="anzAlle" hidden></button>
+      </div>
+    </div>
     <button class="btn primary" type="submit" id="formSubmit">Zur Liste hinzufügen</button>
     <button class="btn" type="button" id="cancel">Verwerfen</button>
   </form>
@@ -265,8 +277,8 @@ h2{font-size:15px;color:var(--mute);font-weight:600;margin:24px 0 8px;text-trans
 </div>
 <div id="toast" role="status" aria-live="polite"></div>
 
-<script src="parse.js?v=2026-09-24.11"></script>
-<script src="picks.js?v=2026-09-24.11"></script>
-<script src="app.js?v=2026-09-24.11"></script>
+<script src="parse.js?v=2026-09-24.12"></script>
+<script src="picks.js?v=2026-09-24.12"></script>
+<script src="app.js?v=2026-09-24.12"></script>
 </body>
 </html>

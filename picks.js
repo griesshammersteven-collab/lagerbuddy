@@ -35,7 +35,8 @@ function applyOp(doc, op) {
       const l = line();
       if (l && !l.scans.some(s => s.ts === op.scan.ts && s.picker === op.scan.picker)) {
         l.scans.push(op.scan);
-        l.picked = Math.round((l.picked + op.scan.menge) * 1000) / 1000; // 0,1 + 0,2 kg ohne Gleitkomma-Rest
+        // anzahl > 1: Sammelbuchung -- ein Gebinde gescannt, weitere gleiche vom Picker bestätigt
+        l.picked = Math.round((l.picked + op.scan.menge * (op.scan.anzahl || 1)) * 1000) / 1000; // 0,1 + 0,2 kg ohne Gleitkomma-Rest
       }
       break;
     }

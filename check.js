@@ -144,4 +144,11 @@ test('Kommamengen ohne Gleitkomma-Rest', () => {
   assert.strictEqual(d.lines[0].picked, 0.3);
 });
 
+test('Sammelbuchung: 14 gleiche Gebinde in einer Buchung, idempotent', () => {
+  const op = { t: 'scan', lid: 'a', scan: { ts: 50, menge: 2.5, anzahl: 14, picker: 'AA' } };
+  const d = run(base(), [op, op]);
+  assert.strictEqual(d.lines[0].picked, 35);
+  assert.strictEqual(d.lines[0].scans.length, 1);
+});
+
 if (failed) { console.log(`\n${failed} Test(s) fehlgeschlagen`); process.exit(1); }
