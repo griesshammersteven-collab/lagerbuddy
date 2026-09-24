@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'sha256-QE5nLQlQW20u1OPv9C6hYQJGhqCMA5dQ8PvhS7MOVEM='; img-src 'self' blob:; connect-src 'self' blob: data:; worker-src 'self' blob:; manifest-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'sha256-bAiocQIobvScJm19rwbCw9s7HIn1PA8xU6yeLiajWuM='; img-src 'self' blob:; connect-src 'self' blob: data:; worker-src 'self' blob:; manifest-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'">
 <meta name="referrer" content="no-referrer">
 <meta name="theme-color" content="#0B4F82">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -44,7 +44,9 @@ h2{font-size:15px;color:var(--mute);font-weight:600;margin:24px 0 8px;text-trans
 .pick-line.skipped{border-color:var(--warn)}
 .pick-skip{color:var(--warn);font-weight:600}
 .pick-skip-btn{width:auto;min-height:40px;margin-top:10px;font-size:14px}
-.pick-gebinde.pick-charge input{width:170px}
+.pick-edit{display:grid;grid-template-columns:1fr 1fr;gap:6px 10px;margin-top:8px}
+.pick-edit label{display:flex;flex-direction:column;gap:2px;color:var(--mute);font-size:12px}
+.pick-edit input{min-height:36px;padding:4px 8px;border-radius:8px;border:1px solid var(--line);background:#041019;color:var(--text);font:inherit;font-size:14px;width:100%}
 #pickApprove{margin-top:8px}
 .pick-now{color:var(--green);font-size:13px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;margin-bottom:4px}
 .pick-note{color:var(--warn);font-weight:600}
@@ -206,7 +208,7 @@ h2{font-size:15px;color:var(--mute);font-weight:600;margin:24px 0 8px;text-trans
 </div>
 <div id="toast" role="status" aria-live="polite"></div>
 
-<script src="parse.js?v=2026-09-23.15"></script>
-<script src="app.js?v=2026-09-23.15"></script>
+<script src="parse.js?v=2026-09-23.16"></script>
+<script src="app.js?v=2026-09-23.16"></script>
 </body>
 </html>

@@ -1,7 +1,7 @@
 'use strict';
 /* LagerBuddy: Etikett fotografieren -> Barcodes + Text lokal auf dem Handy lesen -> Liste -> Excel.
    Alle Bibliotheken liegen in vendor/, kein Bild und keine Nummer verlässt das Gerät. */
-const APP_VERSION = '2026-09-23.15'; // bei JEDER Veröffentlichung erhöhen, genauso wie ?v= in index.html
+const APP_VERSION = '2026-09-23.16'; // bei JEDER Veröffentlichung erhöhen, genauso wie ?v= in index.html
 // Alte index.html (CDN/Offline-Speicher) mit neuerem app.js-Inhalt: dann fehlen Knöpfe und der Start bricht ab.
 // Einmal frisch laden (eindeutige URL geht am CDN vorbei), bevor irgendetwas verdrahtet wird.
 {
@@ -168,16 +168,24 @@ function renderPick() {
     if (l.hinweis) { const n = document.createElement('div'); n.className = 'sub pick-note'; n.textContent = l.hinweis; li.append(n); }
     if (!isDone && l.skipped) { const s = document.createElement('div'); s.className = 'sub pick-skip'; s.textContent = `Übersprungen von ${l.skipped.von || '–'}`; li.append(s); }
 
-    // Charge korrigieren (v. a. nach dem Foto-Import) darf nur der Teamleiter
+    // Artikelnummer/Charge/Menge korrigieren (v. a. nach dem Foto-Import) darf nur der Teamleiter
     if (role === 'master') {
-      const chRow = document.createElement('div'); chRow.className = 'sub pick-gebinde pick-charge';
-      const chInput = document.createElement('input');
-      chInput.type = 'text'; chInput.autocapitalize = 'characters'; chInput.spellcheck = false; chInput.maxLength = 64;
-      chInput.value = l.charge || '';
-      chInput.setAttribute('aria-label', `Charge für Position ${i + 1} (${l.artikel})`);
-      chInput.onchange = () => setPickCharge(l, chInput.value);
-      chRow.append('Charge ', chInput);
-      li.append(chRow);
+      const edit = document.createElement('div'); edit.className = 'pick-edit';
+      const field = (label, key, value, aria, numeric) => {
+        const lab = document.createElement('label'); lab.append(label);
+        const inp = document.createElement('input');
+        inp.type = 'text'; inp.spellcheck = false; inp.maxLength = 64; inp.value = value;
+        if (numeric) inp.inputMode = 'decimal'; else inp.autocapitalize = 'characters';
+        inp.setAttribute('aria-label', aria);
+        inp.onchange = () => setPickField(l, key, inp.value);
+        lab.append(inp);
+        return lab;
+      };
+      edit.append(
+        field('Artikelnummer', 'artikel', l.artikel, `Artikelnummer für Position ${i + 1}`),
+        field('Charge', 'charge', l.charge || '', `Charge für Position ${i + 1} (${l.artikel})`),
+        field(`Menge (${l.einheit})`, 'required', String(l.required).replace('.', ','), `Menge für Position ${i + 1} (${l.artikel})`, true));
+      li.append(edit);
     }
 
     // Gebindegröße steht selten schon auf der Liste -- hier einmal eintragen, dann rechnet die App mit
@@ -221,11 +229,20 @@ function skipPick(l, i) {
   if (!savePick()) { delete l.skipped; return; }
   renderPick();
 }
-function setPickCharge(l, value) {
-  if (role !== 'master') { toast('Nur CMue oder MD können die Charge ändern.'); renderPick(); return; }
-  const before = l.charge;
-  l.charge = value.trim().replace(/\s+/g, ' ');
-  if (!savePick()) l.charge = before;
+function setPickField(l, key, raw) {
+  if (role !== 'master') { toast('Nur CMue oder MD können Positionen ändern.'); renderPick(); return; }
+  let v = raw.trim().replace(/\s+/g, ' ');
+  if (key === 'artikel') {
+    v = v.replace(/\s+/g, '');
+    if (!v) { toast('Die Artikelnummer darf nicht leer sein.'); renderPick(); return; }
+  }
+  if (key === 'required') {
+    v = parseFloat(v.replace(',', '.'));
+    if (!(v > 0)) { toast('Bitte eine Menge größer 0 eintragen.'); renderPick(); return; }
+  }
+  const before = l[key];
+  l[key] = v;
+  if (!savePick()) l[key] = before;
   renderPick();
 }
 $('pickApprove').onclick = () => {
