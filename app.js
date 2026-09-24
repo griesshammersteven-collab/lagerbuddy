@@ -2,7 +2,7 @@
 /* LagerBuddy: Etikett fotografieren -> Barcodes + Text lokal auf dem Handy lesen -> Liste -> Excel.
    Alle Bibliotheken liegen in vendor/, kein Foto verlässt das Gerät. Nur Picklisten (Positionen, Zuteilung,
    Buchungen) werden über Supabase zwischen den Handys abgeglichen, wenn SYNC unten eingerichtet ist. */
-const APP_VERSION = '2026-09-24.10'; // bei JEDER Veröffentlichung erhöhen, genauso wie ?v= in index.html
+const APP_VERSION = '2026-09-24.11'; // bei JEDER Veröffentlichung erhöhen, genauso wie ?v= in index.html
 // Alte index.html (CDN/Offline-Speicher) mit neuerem app.js-Inhalt: dann fehlen Knöpfe und der Start bricht ab.
 // Einmal frisch laden (eindeutige URL geht am CDN vorbei), bevor irgendetwas verdrahtet wird.
 {
@@ -376,6 +376,7 @@ function renderPick() {
     : needsFreigabe ? `Übersprungen: ${fehlen} – Freigabe durch Teamleiter (CMue oder MD) nötig`
     : `${done} von ${total} Artikeln fertig`;
   $('pickApprove').hidden = !(needsFreigabe && role === 'master');
+  $('pickExport').hidden = !(role === 'master' && pickDone(pick)); // fertige Liste: Teamleiter lädt das Ergebnis herunter
   $('pickName').textContent = pick.name + (pick.fuer ? ' · für ' + pick.fuer : '');
   $('pickFuerEditRow').hidden = role !== 'master';
   if (role === 'master') fillPickerSelect($('pickFuerEdit'), pick.fuer, pick.fuer ? '' : 'nicht zugeteilt');
@@ -996,31 +997,81 @@ async function scan(file) {
 for (const id of ['cam', 'gal']) $(id).onchange = ev => { const f = ev.target.files[0]; ev.target.value = ''; scan(f); };
 
 /* ---------- Export ---------- */
+// Tabelle als Excel-Blatt: IDs/Text bleiben Text (führende Nullen, keine Formeln), Mengen bleiben echte Zahlen
+function textSheet(rows, widths) {
+  const ws = XLSX.utils.aoa_to_sheet(rows);
+  for (const k in ws) if (k[0] !== '!' && ws[k].t === 's') ws[k].z = '@';
+  ws['!cols'] = widths.map(wch => ({ wch }));
+  return ws;
+}
+async function saveWorkbook(wb, name) {
+  const buf = XLSX.write(wb, { type: 'array', bookType: 'xlsx' });
+  const blob = new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+  const f = new File([blob], name, { type: blob.type });
+  if (navigator.canShare && navigator.canShare({ files: [f] })) {
+    // iPhone im Homescreen-Modus kann einen Download sonst verschlucken; über die Teilen-Funktion "Sichern" geht immer
+    try { await navigator.share({ files: [f] }); return; }
+    catch (err) { if (err.name === 'AbortError') return; }
+  }
+  // Download selbst auslösen: XLSX.writeFile nimmt bei Safari-Kennung einen Weg ohne Dateinamen ("download")
+  const url = URL.createObjectURL(blob), a = document.createElement('a');
+  a.href = url; a.download = name; a.hidden = true;
+  document.body.append(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 60000);
+}
+const stamp = (d = new Date(), p = n => String(n).padStart(2, '0')) => `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}_${p(d.getHours())}${p(d.getMinutes())}`;
+
 $('export').onclick = async () => {
   try {
     await loadScript('xlsx.mini.min.js');
     const rows = [['Artikelnummer', 'Bezeichnung 1', 'Bezeichnung 2', 'Charge', 'Menge', 'Einheit', 'Lagerplatz', 'Erfasst am', 'Erfasst von'],
       ...list.map(e => [e.artikel, e.bez1, e.bez2, e.charge, e.menge ?? '', e.einheit ?? '', e.lagerplatz ?? '', new Date(e.ts).toLocaleString('de-DE'), e.picker ?? ''])];
-    const ws = XLSX.utils.aoa_to_sheet(rows); // IDs/Text bleiben Text (führende Nullen, keine Formeln), Menge bleibt eine echte Zahl
-    for (const k in ws) if (k[0] !== '!' && ws[k].t === 's') ws[k].z = '@';
-    ws['!cols'] = [{ wch: 16 }, { wch: 34 }, { wch: 34 }, { wch: 14 }, { wch: 10 }, { wch: 8 }, { wch: 16 }, { wch: 20 }, { wch: 16 }];
     const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, 'Erfassung');
-    const d = new Date(), p = n => String(n).padStart(2, '0');
-    const name = `LagerBuddy_${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}_${p(d.getHours())}${p(d.getMinutes())}.xlsx`;
-    const buf = XLSX.write(wb, { type: 'array', bookType: 'xlsx' });
-    const blob = new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
-    const f = new File([blob], name, { type: blob.type });
-    if (navigator.canShare && navigator.canShare({ files: [f] })) {
-      // iPhone im Homescreen-Modus kann einen Download sonst verschlucken; über die Teilen-Funktion "Sichern" geht immer
-      try { await navigator.share({ files: [f] }); return; }
-      catch (err) { if (err.name === 'AbortError') return; }
-    }
-    XLSX.writeFile(wb, name);
+    XLSX.utils.book_append_sheet(wb, textSheet(rows, [16, 34, 34, 14, 10, 8, 16, 20, 16]), 'Erfassung');
+    await saveWorkbook(wb, `LagerBuddy_${stamp()}.xlsx`);
   } catch (err) {
     console.error(err); toast('Export fehlgeschlagen. Bitte nochmal versuchen.');
   }
 };
+
+// Fertige Pickliste für den Teamleiter: Blatt "Pickliste" (Kopf + Soll/Ist je Position) und Blatt "Buchungen"
+// (jedes Gebinde mit gescannter Charge, Picker und Uhrzeit -- für Warenwirtschaft und Chargenrückverfolgung).
+async function exportPick(p) {
+  if (role !== 'master') { toast('Nur Teamleiter können Picklisten exportieren.'); return; }
+  try {
+    await loadScript('xlsx.mini.min.js');
+    const dt = ts => (ts ? new Date(ts).toLocaleString('de-DE') : '');
+    const r3 = n => Math.round(n * 1000) / 1000;
+    const status = l => (l.picked >= l.required ? 'vollständig' : l.skipped ? 'übersprungen, freigegeben' : 'fehlt, freigegeben');
+    const titel = p.name.split(' · ')[0]; // ohne Dateinamen des Fotos
+    const kopf = [
+      ['Pickliste', titel],
+      ['Route', [p.von, p.nach].filter(Boolean).join(' -> ')],
+      ['Picker', p.fuer || 'nicht zugeteilt'],
+      ['Geladen', `${dt(p.importedAt)}${p.geladenVon ? ' von ' + p.geladenVon : ''}`],
+      ['Status', p.freigabe ? `abgeschlossen, fehlende Positionen freigegeben von ${p.freigabe.von} am ${dt(p.freigabe.ts)}` : 'vollständig gepickt'],
+      ['Exportiert', `${dt(Date.now())} von ${picker}`],
+      [],
+      ['Pos.', 'Artikelnummer', 'Bezeichnung', 'Charge', 'Menge soll', 'Menge gepickt', 'Differenz', 'Einheit', 'Gebindegröße',
+        'Gebinde gescannt', 'davon von Hand', 'Status', 'Hinweis'],
+      ...p.lines.map((l, i) => [i + 1, l.artikel, l.bez || '', l.charge || '', l.required, r3(l.picked), r3(l.picked - l.required), l.einheit,
+        l.gebinde ?? '', l.scans.filter(x => !x.manuell).length, l.scans.filter(x => x.manuell).length, status(l), l.hinweis || '']),
+    ];
+    const buchungen = [['Pos.', 'Artikelnummer', 'Charge soll', 'Charge gescannt', 'Menge', 'Einheit', 'Picker', 'Zeitpunkt', 'Buchung'],
+      ...p.lines.flatMap((l, i) => l.scans.map(x => ({ l, i, x }))).sort((a, b) => a.x.ts - b.x.ts)
+        .map(({ l, i, x }) => [i + 1, l.artikel, l.charge || '', x.charge || '', x.menge, l.einheit, x.picker || '', dt(x.ts), x.manuell ? 'von Hand' : 'Scan'])];
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, textSheet(kopf, [16, 18, 30, 16, 11, 13, 10, 8, 13, 15, 14, 24, 20]), 'Pickliste');
+    XLSX.utils.book_append_sheet(wb, textSheet(buchungen, [6, 18, 16, 16, 10, 8, 10, 20, 10]), 'Buchungen');
+    // Dateiname nur ASCII: Umlaute machen Ärger in Windows-Freigaben, Mail-Anhängen und beim Download selbst
+    const slug = t => t.replace(/->|→/g, ' ').replace(/[äöüÄÖÜß]/g, c => ({ ä: 'ae', ö: 'oe', ü: 'ue', Ä: 'Ae', Ö: 'Oe', Ü: 'Ue', ß: 'ss' })[c])
+      .normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^A-Za-z0-9-]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 60);
+    await saveWorkbook(wb, `${slug(titel) || 'Pickliste'}${p.fuer ? '_' + p.fuer : ''}_${stamp()}.xlsx`);
+  } catch (err) {
+    console.error(err); toast('Export fehlgeschlagen. Bitte nochmal versuchen.');
+  }
+}
+$('pickExport').onclick = () => pick && exportPick(pick);
 $('clear').onclick = () => {
   if (!confirm(`Alle ${list.length} Einträge löschen? Vorher herunterladen nicht vergessen.`)) return;
   list = []; save(); render();
