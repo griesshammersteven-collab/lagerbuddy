@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'sha256-dEGI0/wOHvIUKVTUFRhm02yHjPU5XYeyGEwPQyknzII='; img-src 'self' blob:; connect-src 'self' blob: data: https://*.supabase.co; worker-src 'self' blob:; manifest-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'sha256-ojkDICDGv1IDgM1tTEc0qEyDMDIQcrDXqbSGvK493nw='; img-src 'self' blob:; connect-src 'self' blob: data: https://*.supabase.co; worker-src 'self' blob:; manifest-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'">
 <meta name="referrer" content="no-referrer">
 <meta name="theme-color" content="#0B4F82">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -65,6 +65,15 @@ h2{font-size:15px;color:var(--mute);font-weight:600;margin:24px 0 8px;text-trans
 .pick-now{color:var(--green);font-size:13px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;margin-bottom:4px}
 .pick-note{color:var(--warn);font-weight:600}
 .pick-gebinde{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-top:6px}
+.pick-ba{margin-top:10px;padding:10px 12px;border-radius:10px;border:1px solid #e6953a88;background:#e6953a14}
+.pick-ba.ok{border-color:#5cb85c66;background:#5cb85c12}
+.pick-ba-head{display:flex;justify-content:space-between;gap:8px;font-size:13px;font-weight:700;color:var(--warn)}
+.pick-ba.ok .pick-ba-head{color:var(--ok)}
+.pick-ba-grid{display:grid;grid-template-columns:1fr 1.4fr;gap:8px;margin-top:8px}
+.pick-ba-grid label{display:flex;flex-direction:column;gap:2px;color:var(--mute);font-size:12px}
+.pick-ba-grid input{min-height:40px;padding:6px 10px;border-radius:8px;border:1px solid var(--line);background:#041019;color:var(--text);font:inherit;font-size:16px;width:100%}
+.pick-ba-ok{margin-top:8px;min-height:44px;font-size:15px;border-color:var(--warn)}
+.pick-ba-text{font-size:14px;margin-top:4px;color:var(--text)}
 .pick-gebinde input{width:64px;min-height:34px;padding:4px 8px;border-radius:8px;border:1px solid var(--line);background:#041019;color:var(--text);font:inherit;font-size:14px}
 .btn svg{width:22px;height:22px;flex:none}
 .primary{background:var(--green);border-color:var(--green);color:#04170b}
@@ -306,9 +315,9 @@ h2{font-size:15px;color:var(--mute);font-weight:600;margin:24px 0 8px;text-trans
 </div>
 <div id="toast" role="status" aria-live="polite"></div>
 
-<script src="parse.js?v=2026-09-24.14"></script>
-<script src="picks.js?v=2026-09-24.14"></script>
-<script src="app.js?v=2026-09-24.14"></script>
-<script src="tour.js?v=2026-09-24.14"></script>
+<script src="parse.js?v=2026-09-25.1"></script>
+<script src="picks.js?v=2026-09-25.1"></script>
+<script src="app.js?v=2026-09-25.1"></script>
+<script src="tour.js?v=2026-09-25.1"></script>
 </body>
 </html>
