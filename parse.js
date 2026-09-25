@@ -443,8 +443,12 @@ function picklistGridFromWords(ocrLines, width) {
   const firstY = recs.length ? recs[0].y : Infinity;
   const heads = frags.filter(f => f.col !== artCol && colHead(f) && f.y < firstY);
   const groups = new Map();
-  // Werte erst ab der ersten Artikelzeile: darüber stehen noch Kopfzeilen anderer Spalten ("BA-Nr. / Kunde", "best.")
-  const valFrom = recs.length ? firstY - 0.8 * (artHead?.h || recs[0].h || 0) : headY;
+  // Werte erst unterhalb der Kopfzeilen ("BA-Nr. / Kunde", "Artikelnummer / Bezeichnung", "Menge / best."). Grenze ist
+  // die unterste Kopfzeile, nicht die Artikelzeile: Die BA-Nr. in der ersten Spalte steht oft oben in ihrer zweizeiligen
+  // Zelle, gut eine Zeile höher als die Artikelnummer daneben (Foto 11.09.2026, BA-Nr. 29711) -- sonst ging sie verloren.
+  const hh = artHead?.h || recs[0]?.h || 0;
+  const headBottom = Math.max(-Infinity, ...frags.filter(f => anyHead(f) && f.y < firstY).map(f => f.y));
+  const valFrom = recs.length ? Math.max(headBottom + 0.25 * hh, firstY - 2.5 * hh) : headY;
   const valTo = recs.length ? recs.at(-1).y + reach(recs.at(-1)) : Infinity;
   for (const f of frags) {
     if (f.col === artCol || f.y <= headY || f.y < valFrom || f.y > valTo || anyHead(f)) continue;

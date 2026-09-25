@@ -70,6 +70,17 @@ test('Echtes Foto quer: Fußzeile unter der Tabelle gehört nicht zur Position',
 // Weit weg, 5° schief, starkes JPEG: "‘Charge" kam mit 32 % Sicherheit -- ohne diese Überschrift begann die
 // Charge-Spalte erst bei "/Lot" und die Chargen rutschten in die Artikelspalte
 const weit = require('./test/ocr-pickliste-weit.json');
+// Foto 11.09.2026: BA-Nr. steht oben in ihrer zweizeiligen Zelle, gut eine Zeile höher als die Artikelnummer daneben
+test('BA-Nr. höher als die Artikelnummer (oben in der Zelle) wird trotzdem erkannt', () => {
+  for (const shift of [40, 70, 100]) {
+    const f = JSON.parse(JSON.stringify(echt));
+    for (const l of f.lines) for (const w of l.words || []) if (w.text === '29991') { w.bbox.y0 -= shift; w.bbox.y1 -= shift; }
+    const grid = picklistGridFromWords(f.lines, f.width);
+    const p = parsePicklist(grid, grid);
+    assert.deepStrictEqual(p.lines.map(l => [l.ba, l.artikel, l.bez, l.required]), [['29991', '931000136000', '120ml.braunglas', 61000]], shift + ' px');
+  }
+});
+
 test('Echtes Foto quer und ganzer Bildschirm: BA-Nr. erkannt', () => {
   for (const f of [quer, ganz]) {
     const grid = picklistGridFromWords(f.lines, f.width);
