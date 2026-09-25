@@ -2,7 +2,7 @@
 /* LagerBuddy: Etikett fotografieren -> Barcodes + Text lokal auf dem Handy lesen -> Liste -> Excel.
    Alle Bibliotheken liegen in vendor/, kein Foto verlässt das Gerät. Nur Picklisten (Positionen, Zuteilung,
    Buchungen) werden über Supabase zwischen den Handys abgeglichen, wenn SYNC unten eingerichtet ist. */
-const APP_VERSION = '2026-09-25.1'; // bei JEDER Veröffentlichung erhöhen, genauso wie ?v= in index.html
+const APP_VERSION = '2026-09-25.2'; // bei JEDER Veröffentlichung erhöhen, genauso wie ?v= in index.html
 // Alte index.html (CDN/Offline-Speicher) mit neuerem app.js-Inhalt: dann fehlen Knöpfe und der Start bricht ab.
 // Einmal frisch laden (eindeutige URL geht am CDN vorbei), bevor irgendetwas verdrahtet wird.
 {
@@ -472,21 +472,21 @@ function renderPick() {
     return li;
   }));
 }
-// BA-Nr./Kunde je Position: kommt aus dem Foto/Excel (darf leer sein), der Picker prüft es gegen den Auftrag und
+// BA-Nr. (= Kunde) je Position: kommt aus dem Foto/Excel (darf leer sein), der Picker prüft sie gegen den Auftrag und
 // bestätigt mit "Geprüft" -- vor dem ersten Gebinde der Position. Wer als Picker etwas einträgt, hat damit geprüft;
 // ändert der Teamleiter, muss der Picker neu prüfen. Wer geprüft hat, steht an der Position und im Excel.
 function baBlock(l, i, istDran) {
   const box = document.createElement('div');
   box.className = 'pick-ba' + (l.baOk ? ' ok' : '');
   const kopf = document.createElement('div'); kopf.className = 'pick-ba-head';
-  const titel = document.createElement('span'); titel.textContent = 'BA-Nr. / Kunde';
+  const titel = document.createElement('span'); titel.textContent = 'BA-Nr. (Kunde)';
   const stand = document.createElement('span');
   stand.textContent = l.baOk ? `✓ geprüft von ${l.baOk.von || '–'}` : 'bitte prüfen';
   kopf.append(titel, stand); box.append(kopf);
   if (role === 'master' || istDran) {
     const grid = document.createElement('div'); grid.className = 'pick-ba-grid';
-    const feld = (label, key) => {
-      const lab = document.createElement('label'); lab.append(label);
+    const feld = (label, key) => { // Überschrift steht schon im Kasten, das Feld braucht keine zweite
+      const lab = document.createElement('label');
       const inp = document.createElement('input');
       inp.type = 'text'; inp.spellcheck = false; inp.maxLength = 60; inp.value = l[key] || ''; inp.placeholder = 'leer';
       inp.setAttribute('aria-label', `${label} für Position ${i + 1} (${l.artikel})`);
@@ -494,7 +494,7 @@ function baBlock(l, i, istDran) {
       lab.append(inp);
       return lab;
     };
-    grid.append(feld('BA-Nr.', 'ba'), feld('Kunde', 'kunde'));
+    grid.append(feld('BA-Nr. (Kunde)', 'ba'));
     box.append(grid);
     if (!l.baOk) {
       const ok = document.createElement('button');
@@ -504,7 +504,7 @@ function baBlock(l, i, istDran) {
     }
   } else {
     const t = document.createElement('div'); t.className = 'pick-ba-text';
-    t.textContent = `BA-Nr. ${l.ba || '–'} · Kunde ${l.kunde || '–'}`;
+    t.textContent = `BA-Nr. ${l.ba || '–'}`;
     box.append(t);
   }
   return box;
@@ -518,11 +518,11 @@ function setBaFeld(l, key, raw) {
   else baGeprueft(l); // selbst eingetragen = geprüft
   renderPick();
 }
-// Vor dem ersten Gebinde einer Position: BA-Nr./Kunde bestätigen lassen (OK = geprüft, auf das eigene Kürzel)
+// Vor dem ersten Gebinde einer Position: BA-Nr. bestätigen lassen (OK = geprüft, auf das eigene Kürzel)
 function baBestaetigen(l) {
   if (l.baOk) return true;
-  if (!confirm(`Erst BA-Nr. und Kunde prüfen (Position ${pick.lines.indexOf(l) + 1}, ${l.artikel}):\n\n` +
-    `BA-Nr.: ${l.ba || '– leer –'}\nKunde: ${l.kunde || '– leer –'}\n\n` +
+  if (!confirm(`Erst die BA-Nr. (Kunde) prüfen (Position ${pick.lines.indexOf(l) + 1}, ${l.artikel}):\n\n` +
+    `BA-Nr.: ${l.ba || '– leer –'}\n\n` +
     `Stimmt das mit dem Auftrag überein? OK = geprüft (${picker}). Abbrechen = erst bei der Position korrigieren.`)) return false;
   return baGeprueft(l);
 }
@@ -1186,24 +1186,24 @@ async function exportPick(p) {
       ['Status', p.freigabe ? `abgeschlossen, fehlende Positionen freigegeben von ${p.freigabe.von} am ${dt(p.freigabe.ts)}` : 'vollständig gepickt'],
       ['Exportiert', `${dt(Date.now())} von ${picker}`],
       [],
-      ['Pos.', 'BA-Nr.', 'Kunde', 'Artikelnummer', 'Bezeichnung', 'Charge', 'Menge soll', 'Menge gepickt', 'Differenz', 'Einheit', 'Gebindegröße',
-        'Gebinde gescannt', 'davon per Sammelbuchung bestätigt', 'Gebinde von Hand', 'Status', 'BA-Nr./Kunde geprüft', 'Hinweis'],
+      ['Pos.', 'BA-Nr. (Kunde)', 'Artikelnummer', 'Bezeichnung', 'Charge', 'Menge soll', 'Menge gepickt', 'Differenz', 'Einheit', 'Gebindegröße',
+        'Gebinde gescannt', 'davon per Sammelbuchung bestätigt', 'Gebinde von Hand', 'Status', 'BA-Nr. geprüft', 'Hinweis'],
       ...p.lines.map((l, i) => {
         const auto = l.scans.filter(x => !x.manuell);
-        return [i + 1, l.ba || '', l.kunde || '', l.artikel, l.bez || '', l.charge || '', l.required, r3(l.picked), r3(l.picked - l.required), l.einheit, l.gebinde ?? '',
+        return [i + 1, l.ba || '', l.artikel, l.bez || '', l.charge || '', l.required, r3(l.picked), r3(l.picked - l.required), l.einheit, l.gebinde ?? '',
           auto.reduce((s, x) => s + (x.anzahl || 1), 0), auto.reduce((s, x) => s + (x.anzahl || 1) - 1, 0), l.scans.filter(x => x.manuell).reduce((s, x) => s + (x.anzahl || 1), 0),
           status(l), l.baOk ? `${l.baOk.von || '–'}, ${dt(l.baOk.ts)}` : 'nicht geprüft', l.hinweis || ''];
       }),
     ];
     const art = x => (x.manuell ? 'von Hand' : x.anzahl > 1 ? `Sammelbuchung: 1 gescannt, ${x.anzahl - 1} vom Picker bestätigt` : 'Scan');
-    const buchungen = [['Pos.', 'BA-Nr.', 'Artikelnummer', 'Charge soll', 'Charge gescannt', 'Gebinde', 'Menge je Gebinde', 'Menge gesamt', 'Einheit',
+    const buchungen = [['Pos.', 'BA-Nr. (Kunde)', 'Artikelnummer', 'Charge soll', 'Charge gescannt', 'Gebinde', 'Menge je Gebinde', 'Menge gesamt', 'Einheit',
       'Picker', 'Zeitpunkt', 'Buchung'],
       ...p.lines.flatMap((l, i) => l.scans.map(x => ({ l, i, x }))).sort((a, b) => a.x.ts - b.x.ts)
         .map(({ l, i, x }) => [i + 1, l.ba || '', l.artikel, l.charge || '', x.charge || '', x.anzahl || 1, x.menge, r3(x.menge * (x.anzahl || 1)), l.einheit,
           x.picker || '', dt(x.ts), art(x)])];
     const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, textSheet(kopf, [16, 12, 20, 18, 30, 16, 11, 13, 10, 8, 13, 15, 18, 15, 24, 22, 20]), 'Pickliste');
-    XLSX.utils.book_append_sheet(wb, textSheet(buchungen, [6, 12, 18, 16, 16, 8, 15, 13, 8, 10, 20, 44]), 'Buchungen');
+    XLSX.utils.book_append_sheet(wb, textSheet(kopf, [16, 16, 18, 30, 16, 11, 13, 10, 8, 13, 15, 18, 15, 24, 22, 20]), 'Pickliste');
+    XLSX.utils.book_append_sheet(wb, textSheet(buchungen, [6, 16, 18, 16, 16, 8, 15, 13, 8, 10, 20, 44]), 'Buchungen');
     // Dateiname nur ASCII: Umlaute machen Ärger in Windows-Freigaben, Mail-Anhängen und beim Download selbst
     const slug = t => t.replace(/->|→/g, ' ').replace(/[äöüÄÖÜß]/g, c => ({ ä: 'ae', ö: 'oe', ü: 'ue', Ä: 'Ae', Ö: 'Oe', Ü: 'Ue', ß: 'ss' })[c])
       .normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^A-Za-z0-9-]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 60);

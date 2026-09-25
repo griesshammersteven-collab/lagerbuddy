@@ -5,7 +5,7 @@
    Operationen müssen idempotent sein: ging die Antwort des Servers verloren, wird dieselbe Operation noch einmal
    auf einen Stand angewendet, der sie schon enthält (deshalb z. B. Buchungen am Zeitstempel wiedererkennen). */
 
-const PICK_FIELDS = ['artikel', 'charge', 'required', 'gebinde', 'ba', 'kunde', 'baOk']; // baOk: { von, ts } -- BA-Nr./Kunde vom Picker geprüft
+const PICK_FIELDS = ['artikel', 'charge', 'required', 'gebinde', 'ba', 'baOk']; // baOk: { von, ts } -- BA-Nr. vom Picker geprüft
 const cloneDoc = d => (d == null ? null : JSON.parse(JSON.stringify(d)));
 
 // doc: Pickliste oder null (gibt es nicht / gelöscht). Ergebnis: neue Pickliste oder null. doc bleibt unverändert.

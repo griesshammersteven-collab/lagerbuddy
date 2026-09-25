@@ -16,12 +16,12 @@ function tourMerken() {
 function tourDaten(fuer, master) {
   const t = Date.now(), s = (min, menge, von, extra) => ({ ts: t - min * 60000, menge, charge: '', picker: von, fp: 'tour' + min, ...extra });
   const offen = { id: 'tour-a', name: 'Beispiel · Pickliste B4 → Bühl', von: 'B4', nach: 'Bühl', fuer, importedAt: t, lines: [
-    { lid: 'a1', artikel: '931000136000', bez: '120ml Braunglas', charge: 'L2409', ba: '29991', kunde: 'Beispiel GmbH', baOk: { von: fuer, ts: t - 15 * 60000 },
+    { lid: 'a1', artikel: '931000136000', bez: '120ml Braunglas', charge: 'L2409', ba: '29991', baOk: { von: fuer, ts: t - 15 * 60000 },
       required: 3000, einheit: 'Stück', gebinde: 1000, picked: 3000,
       scans: [s(14, 1000, fuer), s(12, 1000, fuer, { anzahl: 2 })] },
-    { lid: 'a2', artikel: '0001446028', bez: 'Kakaobutter', charge: 'K24-117', ba: '29992', kunde: '', required: 350, einheit: 'kg', gebinde: 25, picked: 25,
+    { lid: 'a2', artikel: '0001446028', bez: 'Kakaobutter', charge: 'K24-117', ba: '29992', required: 350, einheit: 'kg', gebinde: 25, picked: 25,
       scans: [s(9, 25, fuer)] },
-    { lid: 'a3', artikel: '93100023', bez: 'Sheabutter', charge: 'S0815', ba: '', kunde: '', required: 60, einheit: 'kg', picked: 0, scans: [] }] };
+    { lid: 'a3', artikel: '93100023', bez: 'Sheabutter', charge: 'S0815', ba: '', required: 60, einheit: 'kg', picked: 0, scans: [] }] };
   if (!master) return [offen];
   const uebersprungen = { id: 'tour-c', name: 'Beispiel · Pickliste Kühlhaus → Linie 2', von: 'KH', nach: 'L2', fuer: 'SB', importedAt: t - 3600000, lines: [
     { lid: 'c1', artikel: '94000451', bez: 'Etiketten 50×30', charge: 'E77', required: 200, einheit: 'Stück', gebinde: 100, picked: 200, scans: [s(70, 100, 'SB', { anzahl: 2 })] },
@@ -47,7 +47,7 @@ const TOUR_PICKER = [
   { ziel: '#pickerBtn', vor: tourUebersicht, titel: 'Ihr Kürzel', text: 'Hier steht, wer angemeldet ist. Schichtende oder Handy weitergeben: antippen und das nächste Kürzel wählen.' },
   { ziel: '#pickCards', vor: tourUebersicht, titel: 'Ihre Picklisten', text: 'Hier landen die Listen, die Ihnen der Teamleiter zuteilt, mit Fortschritt. Ist genau eine offen, öffnet die App sie beim Anmelden direkt.' },
   { ziel: '.pick-line.current', vor: () => tourListe('tour-a'), titel: 'Immer der Reihe nach', text: 'Grün umrandet ist die Position, die jetzt dran ist: Artikel, Charge und Menge. Erledigte werden grün, der Rest wartet.' },
-  { ziel: '.pick-line.current .pick-ba', vor: () => tourListe('tour-a'), titel: 'BA-Nr. und Kunde prüfen', text: 'Vor dem ersten Gebinde gleichen Sie BA-Nr. und Kunde mit dem Auftrag ab, korrigieren bei Bedarf und bestätigen mit „Geprüft“. Die Prüfung steht mit Ihrem Kürzel im Excel.' },
+  { ziel: '.pick-line.current .pick-ba', vor: () => tourListe('tour-a'), titel: 'BA-Nr. prüfen', text: 'Die BA-Nr. steht für den Kunden. Vor dem ersten Gebinde gleichen Sie sie mit dem Auftrag ab, korrigieren bei Bedarf und bestätigen mit „Geprüft“. Die Prüfung steht mit Ihrem Kürzel im Excel.' },
   { ziel: '#camBtn', vor: () => tourListe('tour-a'), titel: 'Gebinde scannen', text: 'Das Etikett jedes Gebindes fotografieren. Die App liest Artikel und Charge per Barcode und schlägt sofort Alarm, wenn etwas nicht zur Position passt.' },
   { ziel: '.f:has(#menge)', vor: tourFormular, titel: 'Die App merkt sich die Menge', text: 'Beim ersten Gebinde geben Sie Menge und Einheit ein, danach ist beides vorausgefüllt. Nur bei einem Anbruch anpassen.' },
   { ziel: '#anzahlRow', vor: tourFormular, titel: 'Viele gleiche Gebinde? Einmal scannen', text: 'Ein Gebinde scannen, bei der Anzahl „Alle“ tippen, bestätigen – fertig. Die Sammelbuchung läuft auf Ihr Kürzel: Mit OK bestätigen Sie, alle Gebinde geprüft zu haben.' },
@@ -64,7 +64,7 @@ const TOUR_MASTER = [
   { ziel: '#pickChoose', vor: tourUebersicht, titel: 'Oder direkt aus Excel', text: 'Die Excel-Datei aus dem ERP geht auch: ohne Texterkennung, ohne Lesefehler.' },
   { ziel: '#pickCards', vor: tourUebersicht, titel: 'Alle Listen im Blick', text: 'Jede Pickliste mit Picker und Fortschritt, live von allen Handys. Offene oben, erledigte mit Haken.' },
   { ziel: '#pickFuerEditRow', vor: () => tourListe('tour-a'), titel: 'Umteilen', text: 'Picker krank oder in der Pause? Liste einem anderen zuteilen – sie wandert sofort auf dessen Handy.' },
-  { ziel: '.pick-line.current .pick-edit', vor: () => tourListe('tour-a'), titel: 'Prüfen und korrigieren', text: 'Nach dem Foto-Import kurz gegenchecken: Artikelnummer, Charge und Menge ändern nur Teamleiter. BA-Nr. und Kunde bestätigt der Picker vor dem Picken.' },
+  { ziel: '.pick-line.current .pick-edit', vor: () => tourListe('tour-a'), titel: 'Prüfen und korrigieren', text: 'Nach dem Foto-Import kurz gegenchecken: Artikelnummer, Charge und Menge ändern nur Teamleiter. Die BA-Nr. bestätigt der Picker vor dem Picken.' },
   { ziel: '.pick-line.done .pick-count', vor: () => tourListe('tour-a'), titel: 'Jedes Gebinde nachvollziehbar', text: 'Wie viele Gebinde gescannt wurden, wie viele per Sammelbuchung bestätigt (mit Kürzel des Pickers) und was von Hand gebucht wurde.' },
   { ziel: '#pickApprove', vor: () => tourListe('tour-c'), titel: 'Fehlende Ware freigeben', text: 'Hat ein Picker Positionen übersprungen, weil die Ware fehlt, geben Sie sie hier frei und schließen die Liste ab.' },
   { ziel: '#pickExport', vor: () => tourListe('tour-b'), titel: 'Ergebnis als Excel', text: 'Fertige Listen als Excel: Soll und Ist je Position plus jede Buchung mit Picker, Charge und Uhrzeit.' },

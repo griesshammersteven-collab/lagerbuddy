@@ -43,7 +43,7 @@ test('Echtes Foto: zentrierte Werte, BA-Nr.-Spalte, Tausenderpunkt', () => {
   const p = parsePicklist(grid, grid);
   assert.deepStrictEqual(p.lines.map(l => [l.artikel, l.bez, l.charge, l.required, l.einheit]),
     [['931000136000', '120ml.braunglas', '', 61000, 'Stück']]);
-  assert.deepStrictEqual(p.lines.map(l => [l.ba, l.kunde]), [['29991', '']], 'BA-Nr. erkannt, Kunde leer');
+  assert.deepStrictEqual(p.lines.map(l => l.ba), ['29991'], 'BA-Nr. erkannt');
   assert.strictEqual(p.skipped, 0);
   assert.strictEqual(p.von, 'B4'); assert.strictEqual(p.nach, 'Bühl');
 });
@@ -77,17 +77,15 @@ test('Echtes Foto quer und ganzer Bildschirm: BA-Nr. erkannt', () => {
   }
 });
 
-test('Excel: BA-Nr. in der Artikelzeile, Kunde darunter; ohne Spalte leer', () => {
+test('Excel: BA-Nr. (Kunde) in der Artikelzeile, auch mit Kopf nur "Kunde"; ohne Spalte leer', () => {
   const raw = [['Pickliste B4 -> Bühl'], ['BA-Nr.', 'Artikelnummer', 'Charge / Lot', 'Menge'], ['Kunde', 'Bezeichnung', '', 'best.'],
-    ['29991', '10006349PFL', '1446028', '225 kg'], ['Müller GmbH', 'Kakaobutter', 'GEKÜHLTE WARE', ''],
+    ['29991', '10006349PFL', '1446028', '225 kg'], ['', 'Kakaobutter', 'GEKÜHLTE WARE', ''],
     ['', '91000451', '500912', '24'], ['', 'Zucker fein', '', '']];
   const p = parsePicklist(raw);
-  assert.deepStrictEqual(p.lines.map(l => [l.artikel, l.ba, l.kunde, l.bez, l.hinweis]),
-    [['10006349PFL', '29991', 'Müller GmbH', 'Kakaobutter', 'GEKÜHLTE WARE'], ['91000451', '', '', 'Zucker fein', '']]);
-  const eigene = parsePicklist([['BA-Nr.', 'Kunde', 'Artikelnummer', 'Menge'], ['30012', 'Hofmann', '93100023', '8 kg']]);
-  assert.deepStrictEqual([eigene.lines[0].ba, eigene.lines[0].kunde], ['30012', 'Hofmann'], 'Kunde als eigene Spalte');
-  const ohne = parsePicklist([['Artikelnummer', 'Menge'], ['93100023', '8 kg']]);
-  assert.deepStrictEqual([ohne.lines[0].ba, ohne.lines[0].kunde], ['', ''], 'ohne Spalte leer');
+  assert.deepStrictEqual(p.lines.map(l => [l.artikel, l.ba, l.bez, l.hinweis]),
+    [['10006349PFL', '29991', 'Kakaobutter', 'GEKÜHLTE WARE'], ['91000451', '', 'Zucker fein', '']]);
+  assert.strictEqual(parsePicklist([['Kunde', 'Artikelnummer', 'Menge'], ['30012', '93100023', '8 kg']]).lines[0].ba, '30012', 'Kopf nur "Kunde"');
+  assert.strictEqual(parsePicklist([['Artikelnummer', 'Menge'], ['93100023', '8 kg']]).lines[0].ba, '', 'ohne Spalte leer');
 });
 
 test('Foto weit weg: unsichere Überschrift bestimmt trotzdem die Spalte', () => {
