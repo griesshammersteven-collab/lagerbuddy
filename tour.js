@@ -90,6 +90,7 @@ function tourStart() {
   $('tour').hidden = false;
   document.body.classList.add('touring');
   tour.timer = setInterval(tourPlatzieren, 400); // Liste kann neu gezeichnet werden (Abgleich), dann Ziel neu suchen
+  sperren(true);
   tourZeigen();
   $('tourNext').focus();
 }
@@ -100,6 +101,7 @@ function tourEnde() {
   tourMerken();
   $('tour').hidden = true;
   document.body.classList.remove('touring');
+  if ($('gate').hidden) sperren(false);
   tourDemo = [];
   if (!$('form').hidden) closeForm();
   openId = vorher.openId; recompute();
@@ -107,6 +109,7 @@ function tourEnde() {
   window.scrollTo({ top: vorher.y });
   // Beim ersten Anmelden kam die zugeteilte Liste erst während des Rundgangs vom Server: jetzt hinführen
   if (landenNachTour) { landenNachTour = false; if (!pick) landen(); }
+  if ($('gate').hidden) $('tourBtn').focus({ preventScroll: true });
 }
 function tourZeigen() {
   const s = tour.schritte[tour.i], n = tour.schritte.length;

@@ -55,7 +55,7 @@ function tmOeffnen(p) {
   $('tmErr').hidden = true;
   tmRolleHinweis();
   renderTeam();
-  $('tmForm').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  $('tmForm').scrollIntoView({ behavior: glatt(), block: 'start' });
   if (neu) setTimeout(() => $('tmKuerzel').focus(), 50);
 }
 function tmSchliessen() { tmEdit = null; renderTeam(); }
@@ -68,7 +68,8 @@ function zeigePasswort(kuerzel, pw, hinweis) {
   $('tmPwHint').textContent = hinweis;
   $('tmPwBox').hidden = false;
   tmEdit = null; renderTeam();
-  $('tmPwBox').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  $('tmPwBox').scrollIntoView({ behavior: glatt(), block: 'start' });
+  $('tmPwOk').focus({ preventScroll: true });
 }
 
 async function tmSpeichern(ev) {
@@ -130,6 +131,7 @@ $('teamBtn').onclick = () => {
   window.scrollTo({ top: 0 });
 };
 $('tmNeu').onclick = () => tmOeffnen(null);
+$('tmZurueck').onclick = () => { if (mode === 'team') $('teamBtn').click(); };
 $('tmCancel').onclick = tmSchliessen;
 $('tmForm').onsubmit = tmSpeichern;
 $('tmReset').onclick = tmZuruecksetzen;

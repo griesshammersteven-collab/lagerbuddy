@@ -151,15 +151,15 @@ function lpVorschlag(r) {
 $('lpCode').addEventListener('input', () => { $('t-lp').className = 'tag'; $('t-lp').textContent = ''; });
 function lpWert() {
   const roh = $('lpCode').value.trim();
-  if (!roh) { toast('Bitte den Lagerplatz scannen oder eintippen (z. B. H3.01.01.00.01).'); $('lpCode').focus(); return ''; }
+  if (!roh) { toast('Bitte den Lagerplatz scannen oder eintippen (z. B. H3.01.01.00.01).'); $('lpCode').setAttribute('aria-invalid', 'true'); $('lpCode').focus(); return ''; }
   const [lp] = findLagerplatz(roh);
-  if (!lp) { toast(`„${roh}“ ist kein gültiger Lagerplatz. Richtig ist z. B. H3.01.01.00.01.`); $('lpCode').focus(); return ''; }
+  if (!lp) { toast(`„${roh}“ ist kein gültiger Lagerplatz. Richtig ist z. B. H3.01.01.00.01.`); $('lpCode').setAttribute('aria-invalid', 'true'); $('lpCode').focus(); return ''; }
   $('lpCode').value = lp;
   return lp;
 }
 function richtungWert() {
   const r = document.querySelector('input[name=richtung]:checked')?.value || '';
-  if (!r) toast('Bitte „Ausbuchen“ oder „Einbuchen“ wählen.');
+  if (!r) { toast('Bitte „Ausbuchen“ oder „Einbuchen“ wählen.'); document.querySelector('input[name=richtung]').focus(); }
   return r;
 }
 

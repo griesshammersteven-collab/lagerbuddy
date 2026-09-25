@@ -2,7 +2,7 @@
 /* LagerBuddy: Etikett fotografieren -> Barcodes + Text lokal auf dem Handy lesen -> Liste -> Excel.
    Alle Bibliotheken liegen in vendor/, kein Foto verlässt das Gerät. Nur Picklisten (Positionen, Zuteilung,
    Buchungen) werden über Supabase zwischen den Handys abgeglichen, wenn SYNC unten eingerichtet ist. */
-const APP_VERSION = '2026-09-25.5'; // bei JEDER Veröffentlichung erhöhen, genauso wie ?v= in index.html
+const APP_VERSION = '2026-09-25.6'; // bei JEDER Veröffentlichung erhöhen, genauso wie ?v= in index.html
 // Alte index.html (CDN/Offline-Speicher) mit neuerem app.js-Inhalt: dann fehlen Knöpfe und der Start bricht ab.
 // Einmal frisch laden (eindeutige URL geht am CDN vorbei), bevor irgendetwas verdrahtet wird.
 {
@@ -112,10 +112,19 @@ function commit(id, op) {
 }
 
 let toastT;
+// Anzeigedauer nach Länge (4 bis 12 s), damit auch lange Hinweise lesbar sind; Antippen schließt.
+// Gleicher Text wie eben: erst leeren, dann setzen, sonst sagen Screenreader ihn kein zweites Mal an.
 function toast(msg) {
-  const t = $('toast'); t.textContent = msg; t.classList.add('on');
-  clearTimeout(toastT); toastT = setTimeout(() => t.classList.remove('on'), 3200);
+  const t = $('toast');
+  if (t.textContent === msg) { t.textContent = ''; requestAnimationFrame(() => { t.textContent = msg; }); } else t.textContent = msg;
+  t.classList.add('on');
+  clearTimeout(toastT); toastT = setTimeout(() => t.classList.remove('on'), Math.min(12000, Math.max(4000, msg.length * 70)));
 }
+$('toast').onclick = () => { clearTimeout(toastT); $('toast').classList.remove('on'); };
+// Weich scrollen nur, wenn das System keine reduzierte Bewegung wünscht
+const glatt = () => (matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth');
+// Hintergrund für Tastatur und Screenreader sperren, solange Anmeldung oder Rundgang offen sind
+function sperren(an) { for (const sel of ['header', 'main', '#bar']) document.querySelector(sel).inert = an; }
 
 const scripts = {};
 function loadScript(path) {
@@ -313,6 +322,8 @@ function setMode(m) {
   $('lagerView').hidden = m !== 'lager';
   $('teamView').hidden = m !== 'team';
   $('teamBtn').classList.toggle('active', m === 'team');
+  $('teamBtn').setAttribute('aria-pressed', String(m === 'team'));
+  document.title = { scan: 'Erfassen', pick: 'Pickliste', lager: 'Lager', team: 'Team verwalten' }[m] + ' · LagerBuddy';
   $('exportBar').hidden = m !== 'scan';
   $('pickBar').hidden = true; // im Pickliste-Modus entscheidet renderPick
   if (m === 'pick') { renderPick(); return; }
@@ -398,7 +409,7 @@ function renderPick() {
   const complete = missing === 0 || !!pick.freigabe;
   const cur = currentPickLine();
   const fehlen = missing === 1 ? '1 Position fehlt' : `${missing} Positionen fehlen`;
-  $('pickBanner').className = 'card pick-banner' + (complete ? ' done' : '');
+  $('pickBanner').className = 'card pick-banner' + (complete ? ' done' : needsFreigabe ? ' warn' : '');
   $('pickBanner').textContent = missing === 0 ? '✓ Pickliste vollständig. Aufgabe erledigt.'
     : pick.freigabe ? `✓ Pickliste abgeschlossen: freigegeben von ${pick.freigabe.von}, ${fehlen}`
     : needsFreigabe ? `Übersprungen: ${fehlen}. Ein Teamleiter muss freigeben.`
@@ -413,6 +424,7 @@ function renderPick() {
     const li = document.createElement('li');
     const isDone = l.picked >= l.required;
     li.className = 'card pick-line' + (isDone ? ' done' : l === cur ? ' current' : ' waiting') + (!isDone && l.skipped ? ' skipped' : '');
+    if (l === cur) li.setAttribute('aria-current', 'step');
     if (l === cur) {
       const now = document.createElement('div'); now.className = 'pick-now';
       now.textContent = l.skipped ? `Übersprungen · Position ${i + 1}: nachholen oder vom Teamleiter freigeben lassen` : `Jetzt buchen · Position ${i + 1} von ${total}`;
@@ -461,7 +473,7 @@ function renderPick() {
     const gebRow = document.createElement('div'); gebRow.className = 'sub pick-gebinde';
     gebRow.append('Gebindegröße ');
     const gebInput = document.createElement('input');
-    gebInput.type = 'text'; gebInput.inputMode = 'decimal'; gebInput.placeholder = 'z. B. 25';
+    gebInput.type = 'text'; gebInput.inputMode = 'decimal'; gebInput.placeholder = '25';
     gebInput.value = l.gebinde ? String(l.gebinde).replace('.', ',') : '';
     gebInput.setAttribute('aria-label', `Gebindegröße für ${l.artikel}`);
     // steht sie einmal fest, ändert sie nur der Teamleiter -- sonst ließe sich "ein Scan = ein Gebinde" aushebeln
@@ -937,8 +949,14 @@ function showForm(r, file, idx = null) {
   if (file) $('preview').src = previewUrl; else $('preview').removeAttribute('src');
   $('form').hidden = false; $('scan').hidden = true; $('bar').hidden = true; $('modeSwitch').hidden = true;
   renderAnzahl();
-  $('form').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  formGeaendert = false;
+  for (const el of $('form').querySelectorAll('[aria-invalid]')) el.removeAttribute('aria-invalid');
+  $('form').scrollIntoView({ behavior: glatt(), block: 'start' });
+  $('form').focus({ preventScroll: true });
 }
+// Von Hand getippt? Dann vor dem Verwerfen einmal nachfragen (ein bloß fotografiertes Etikett verwirft man ohne Rückfrage)
+let formGeaendert = false;
+$('form').addEventListener('input', ev => { formGeaendert = true; ev.target.removeAttribute?.('aria-invalid'); });
 function closeForm() {
   $('form').hidden = true; $('scan').hidden = false; $('bar').hidden = false; $('modeSwitch').hidden = !modiSichtbar();
   editIdx = null;
@@ -951,7 +969,7 @@ $('form').onsubmit = ev => {
   ev.preventDefault();
   const e = { ts: Date.now() };
   for (const f of FIELDS) e[f] = $(f).value.trim().replace(/\s+/g, ' ');
-  if (!e.artikel) { toast('Bitte eine Artikelnummer eintragen.'); $('artikel').focus(); return; }
+  if (!e.artikel) { toast('Bitte eine Artikelnummer eintragen.'); $('artikel').setAttribute('aria-invalid', 'true'); $('artikel').focus(); return; }
   const menge = parseDe($('menge').value); // deutsches Format ("12,5", "1.000"), type=number kennt nur den Punkt
   if (!(menge > 0)) { toast('Bitte die Menge pro Gebinde eintragen.'); $('menge').focus(); return; }
   const einheit = document.querySelector('input[name=einheit]:checked')?.value;
@@ -981,7 +999,7 @@ $('form').onsubmit = ev => {
   merken(e.artikel, e.menge, e.einheit);
   render(); closeForm(); toast('Hinzugefügt.');
 };
-$('cancel').onclick = closeForm;
+$('cancel').onclick = () => { if (!formGeaendert || confirm('Eingaben verwerfen? Sie werden nicht gespeichert.')) closeForm(); };
 $('manual').onclick = () => showForm({}, null);
 
 /* ---------- Scan ---------- */
@@ -1274,7 +1292,7 @@ async function applyUpdate() {
 }
 $('updBtn').onclick = $('gateUpd').onclick = applyUpdate;
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') setTimeout(checkUpdate, 1500); });
-$('ver').textContent = 'v' + APP_VERSION;
+$('ver').textContent = $('gateVer').textContent = 'Version ' + APP_VERSION;
 if ('serviceWorker' in navigator && /^https?:$/.test(location.protocol)) navigator.serviceWorker.register('sw.js').catch(() => {});
 
 /* ---------- Zugang: wer nutzt das Handy gerade? ---------- */
@@ -1344,9 +1362,10 @@ function showGate() {
   $('lagerForm').hidden = !einrichten;
   $('gateWho').hidden = einrichten;
   $('gate').hidden = false;
+  sperren(true);
   closeTlForm();
   if (einrichten) setTimeout(() => $('lagerCode').focus(), 50);
-  else ladeTeam(true);
+  else { $('gateTitel').focus({ preventScroll: true }); ladeTeam(true); }
 }
 function lagerUngueltig() {
   if (!lager) return;
@@ -1388,11 +1407,13 @@ function login(code, r, info) {
   if (!bereiche.length) bereiche = ALLE_BEREICHE;
   if (r !== 'master') tlAuth = null;
   $('gate').hidden = true;
+  sperren(false);
   if (!$('form').hidden) closeForm(); // halb erfasstes Etikett gehört dem vorherigen Nutzer
   openId = null; pick = null;
   if (mode === 'team') setMode('scan'); // Verwaltung nie für den nächsten offen lassen
   renderPicker(); applyRoleUI();
   const gelandet = landen();
+  (document.querySelector('#modeSwitch:not([hidden]) .mode-btn.active') || $('pickerBtn')).focus({ preventScroll: true });
   // frisch vom Server holen; war lokal noch nichts da, danach nochmal schauen
   if (SYNC_ON && lager) syncNow(true).then(() => {
     if (gelandet || picker !== code || pick) return;
