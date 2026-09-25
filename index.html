@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'sha256-p0UYmqRTsKgdjAudNoaAXzuLogaFiKr90U9Qs6lKIRA='; img-src 'self' blob:; connect-src 'self' blob: data: https://*.supabase.co; worker-src 'self' blob:; manifest-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'sha256-eACIqlomyPf0jOcRZSLgaEq7iQbwWE0tkH/vQhkRvbA='; img-src 'self' blob:; connect-src 'self' blob: data: https://*.supabase.co; worker-src 'self' blob:; manifest-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'">
 <meta name="referrer" content="no-referrer">
 <meta name="theme-color" content="#0B4F82">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -66,6 +66,32 @@ h2{font-size:15px;color:var(--mute);font-weight:600;margin:24px 0 8px;text-trans
 .pick-note{color:var(--warn);font-weight:600}
 .pick-gebinde{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-top:6px}
 #modeSwitch{grid-template-columns:repeat(3,1fr)}
+#modeSwitch[data-n="2"]{grid-template-columns:1fr 1fr}
+.team-btn{width:30px;padding:3px 0;display:flex;align-items:center;justify-content:center}
+.team-btn svg{width:16px;height:16px;flex:none}
+.hmeta .picker-btn{flex:none}
+h1{white-space:nowrap}
+@media (max-width:400px){header h1{font-size:20px}}
+.team-btn.active{border-color:var(--green);background:#22b84a55}
+.pw-lead{font-weight:700;margin:0 0 4px}
+.pw-zweit{margin-top:10px}
+#tmNeu{margin-bottom:12px}
+#tmList{list-style:none;margin:0 0 12px;padding:0;display:grid;gap:8px}
+#tmList .entry{display:grid;width:100%}
+#tmList .card.aus{opacity:.55}
+.tm-kopf{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.tm-rolle{font-size:12px;font-weight:700;padding:2px 8px;border-radius:99px;color:var(--mute);background:#93aabb1f}
+.tm-rolle.admin{color:var(--green);background:#22b84a1f}
+.tm-rolle.hauptadmin{color:#04170b;background:var(--green)}
+.tm-form{display:grid;gap:12px;margin-bottom:12px;border-color:var(--green)}
+.tm-rollen,.tm-bereiche{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.tm-rollen .btn,.tm-bereiche .btn{padding:0 6px;font-size:15px}
+.tm-label{font-size:13px;color:var(--mute);margin:0 0 4px;display:flex;justify-content:space-between}
+.tm-aktiv{display:flex;align-items:center;gap:10px;font-weight:600}
+.tm-aktiv input{width:22px;height:22px;accent-color:var(--green)}
+.pw-box{margin-bottom:12px;border-color:var(--green)}
+.pw-box-head{font-weight:700}
+.pw-code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:26px;font-weight:700;letter-spacing:1.5px;color:var(--green);margin:10px 0 4px;user-select:all;word-break:break-all}
 .f .file{width:1px;height:1px;min-height:0;padding:0;border:0} /* versteckte Datei-/Auswahlfelder nicht wie Eingabefelder aufziehen */
 .lp-row{display:grid;grid-template-columns:1fr auto;gap:10px}
 .lp-row input{min-width:0;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.5px}
@@ -120,8 +146,8 @@ h2{font-size:15px;color:var(--mute);font-weight:600;margin:24px 0 8px;text-trans
 .tag.ok{color:var(--ok);background:#5cb85c1f}.tag.check{color:var(--warn);background:#e6953a1f}
 #list{list-style:none;margin:0;padding:0;display:grid;gap:8px}
 #list li{display:grid;grid-template-columns:1fr auto auto;gap:4px;align-items:start}
-.hmeta{display:flex;align-items:center;gap:8px}
-.ver{color:#fff;opacity:.75;font-size:12px}
+.hmeta{display:flex;align-items:center;gap:6px}
+.ver{color:#fff;opacity:.75;font-size:11px;line-height:1.2}
 .picker-btn{background:#ffffff26;border:1px solid #ffffff40;color:#fff;font:inherit;font-size:12px;font-weight:600;padding:4px 10px;border-radius:99px;cursor:pointer;max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .picker-btn.is-master{border-color:var(--green);background:#22b84a33}
 .gate{position:fixed;inset:0;z-index:50;display:flex;align-items:center;padding:16px;background:var(--bg)}
@@ -199,11 +225,25 @@ h2{font-size:15px;color:var(--mute);font-weight:600;margin:24px 0 8px;text-trans
           <button class="btn primary" type="submit" id="tlBtn">Anmelden</button>
         </div>
       </form>
+      <form id="pwForm" class="tl-form" hidden autocomplete="on">
+        <p class="pw-lead" id="pwLabel">Eigenes Passwort festlegen</p>
+        <p class="pick-hint">Das Startpasswort gilt nur für die erste Anmeldung. Bitte jetzt ein eigenes wählen (mindestens 8 Buchstaben oder Ziffern).</p>
+        <input id="pwUser" name="username" autocomplete="username" hidden>
+        <label for="pwNeu">Neues Passwort</label>
+        <input id="pwNeu" name="new-password" type="password" autocomplete="new-password" autocapitalize="characters" autocorrect="off" spellcheck="false" maxlength="100">
+        <label for="pwNeu2" class="pw-zweit">Nochmal eingeben</label>
+        <input id="pwNeu2" type="password" autocomplete="new-password" autocapitalize="characters" autocorrect="off" spellcheck="false" maxlength="100">
+        <p class="tl-err" id="pwErr" role="alert" hidden></p>
+        <div class="row">
+          <button class="btn" type="button" id="pwCancel">Abbrechen</button>
+          <button class="btn primary" type="submit" id="pwBtn">Speichern</button>
+        </div>
+      </form>
     </div>
   </div>
 </div>
 
-<header><h1>Lager<span>Buddy</span></h1><div class="hmeta"><button class="picker-btn tour-btn" type="button" id="tourBtn" aria-label="Rundgang starten" title="Rundgang">?</button><button class="picker-btn" type="button" id="pickerBtn"></button><span class="ver" id="ver"></span></div></header>
+<header><h1>Lager<span>Buddy</span></h1><div class="hmeta"><button class="picker-btn team-btn" type="button" id="teamBtn" aria-label="Team verwalten" title="Team verwalten" hidden><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg></button><button class="picker-btn tour-btn" type="button" id="tourBtn" aria-label="Rundgang starten" title="Rundgang">?</button><button class="picker-btn" type="button" id="pickerBtn"></button><span class="ver" id="ver"></span></div></header>
 
 <main>
   <div class="card update" id="update" role="status" hidden>
@@ -331,6 +371,46 @@ h2{font-size:15px;color:var(--mute);font-weight:600;margin:24px 0 8px;text-trans
     <p class="empty" id="bestandLeer">Noch nichts eingebucht.</p>
     <button class="btn" type="button" id="bestandExport" hidden>Bestand und Buchungen als Excel</button>
   </div>
+  <div id="teamView" hidden>
+    <h2>Team verwalten</h2>
+    <div class="card pw-box" id="tmPwBox" role="status" hidden>
+      <div class="pw-box-head" id="tmPwTitel"></div>
+      <div class="pw-code" id="tmPwCode"></div>
+      <p class="pick-hint" id="tmPwHint"></p>
+      <div class="row">
+        <button class="btn" type="button" id="tmPwCopy">Kopieren</button>
+        <button class="btn primary" type="button" id="tmPwOk">Fertig</button>
+      </div>
+    </div>
+    <form class="card tm-form" id="tmForm" hidden autocomplete="off">
+      <b id="tmTitel">Person anlegen</b>
+      <div class="f"><label for="tmKuerzel">Kürzel <span class="sub">2 bis 8 Zeichen, zum Anmelden</span></label><input id="tmKuerzel" maxlength="8" autocapitalize="off" spellcheck="false"></div>
+      <div class="f"><label for="tmName">Name <span class="sub">optional</span></label><input id="tmName" maxlength="60"></div>
+      <div><p class="tm-label">Rolle</p>
+        <div class="tm-rollen unit">
+          <label class="btn"><input class="file" type="radio" name="tmRolle" value="picker"> Picker</label>
+          <label class="btn"><input class="file" type="radio" name="tmRolle" value="admin"> Teamleiter</label>
+          <label class="btn"><input class="file" type="radio" name="tmRolle" value="hauptadmin"> Hauptadmin</label>
+        </div>
+      </div>
+      <p class="pick-hint" id="tmRolleHint"></p>
+      <div><p class="tm-label">Bereiche <span class="sub">was die Person in der App sieht</span></p>
+        <div class="tm-bereiche unit">
+          <label class="btn"><input class="file" type="checkbox" name="tmBereich" value="erfassen"> Erfassen</label>
+          <label class="btn"><input class="file" type="checkbox" name="tmBereich" value="pickliste"> Pickliste</label>
+          <label class="btn"><input class="file" type="checkbox" name="tmBereich" value="lager"> Lager</label>
+        </div>
+      </div>
+      <label class="tm-aktiv"><input type="checkbox" id="tmAktiv"> Aktiv (erscheint beim Anmelden)</label>
+      <p class="tl-err" id="tmErr" role="alert" hidden></p>
+      <button class="btn primary" type="submit" id="tmSave">Speichern</button>
+      <button class="btn" type="button" id="tmReset" hidden>Passwort zurücksetzen</button>
+      <button class="btn" type="button" id="tmCancel">Abbrechen</button>
+    </form>
+    <button class="btn primary" type="button" id="tmNeu">+ Person anlegen</button>
+    <ul id="tmList"></ul>
+    <p class="pick-hint" id="tmHint">Picker melden sich nur mit dem Kürzel an. Teamleiter und Hauptadmin bekommen beim Anlegen ein Startpasswort und wählen bei der ersten Anmeldung ein eigenes.</p>
+  </div>
 </main>
 
 <div class="bar" id="bar">
@@ -361,10 +441,11 @@ h2{font-size:15px;color:var(--mute);font-weight:600;margin:24px 0 8px;text-trans
 </div>
 <div id="toast" role="status" aria-live="polite"></div>
 
-<script src="parse.js?v=2026-09-25.4"></script>
-<script src="picks.js?v=2026-09-25.4"></script>
-<script src="app.js?v=2026-09-25.4"></script>
-<script src="lager.js?v=2026-09-25.4"></script>
-<script src="tour.js?v=2026-09-25.4"></script>
+<script src="parse.js?v=2026-09-25.5"></script>
+<script src="picks.js?v=2026-09-25.5"></script>
+<script src="app.js?v=2026-09-25.5"></script>
+<script src="lager.js?v=2026-09-25.5"></script>
+<script src="team.js?v=2026-09-25.5"></script>
+<script src="tour.js?v=2026-09-25.5"></script>
 </body>
 </html>

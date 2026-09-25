@@ -2,7 +2,7 @@
 /* LagerBuddy: Etikett fotografieren -> Barcodes + Text lokal auf dem Handy lesen -> Liste -> Excel.
    Alle Bibliotheken liegen in vendor/, kein Foto verlässt das Gerät. Nur Picklisten (Positionen, Zuteilung,
    Buchungen) werden über Supabase zwischen den Handys abgeglichen, wenn SYNC unten eingerichtet ist. */
-const APP_VERSION = '2026-09-25.4'; // bei JEDER Veröffentlichung erhöhen, genauso wie ?v= in index.html
+const APP_VERSION = '2026-09-25.5'; // bei JEDER Veröffentlichung erhöhen, genauso wie ?v= in index.html
 // Alte index.html (CDN/Offline-Speicher) mit neuerem app.js-Inhalt: dann fehlen Knöpfe und der Start bricht ab.
 // Einmal frisch laden (eindeutige URL geht am CDN vorbei), bevor irgendetwas verdrahtet wird.
 {
@@ -40,7 +40,8 @@ let openId = null; // id der geöffneten Pickliste, null = Übersicht
 let pick = null; // die geöffnete Pickliste aus picks (nach jedem recompute neu gesetzt)
 let tourDemo = []; // Beispiel-Picklisten, solange der Rundgang läuft (tour.js)
 let picker = '', role = ''; // erst nach der Auswahl am Zugangs-Gate gültig, siehe ganz unten
-let mode = 'scan'; // 'scan' (freie Liste) oder 'pick' (Pickliste)
+let rang = '', bereiche = []; // picker | admin | hauptadmin, und welche Teile der App die Person sieht (Team, unten)
+let mode = 'scan'; // 'scan' (freie Liste), 'pick' (Pickliste), 'lager' (Bestand) oder 'team' (Verwaltung, team.js)
 let busy = false;
 let editIdx = null; // Index des Listeneintrags, der gerade bearbeitet wird
 let previewUrl = null;
@@ -236,7 +237,7 @@ async function pull(full) {
   }
   renderSyncState();
 }
-async function syncNow(full) { await push(); await pull(full); }
+async function syncNow(full) { await push(); await pull(full); ladeTeam(full); }
 
 // alle 5 s in der Pickliste, sonst alle 30 s; nur mit sichtbarer App und angemeldetem Nutzer
 let lastSync = 0;
@@ -310,9 +311,12 @@ function setMode(m) {
   $('freeListView').hidden = m !== 'scan';
   $('pickView').hidden = m !== 'pick';
   $('lagerView').hidden = m !== 'lager';
+  $('teamView').hidden = m !== 'team';
+  $('teamBtn').classList.toggle('active', m === 'team');
   $('exportBar').hidden = m !== 'scan';
   $('pickBar').hidden = true; // im Pickliste-Modus entscheidet renderPick
   if (m === 'pick') { renderPick(); return; }
+  if (m === 'team') { $('scan').hidden = true; renderTeam(); return; }
   // Erfassen und Lager: Wareneingang kommt mit fremden Etiketten (oft ohne unsere Barcodes) -- Galerie/von Hand für alle
   $('scan').hidden = false; $('galBtn').hidden = $('manual').hidden = false;
   $('camText').textContent = m === 'lager' ? 'Gebinde ein- oder ausbuchen' : 'Etikett fotografieren';
@@ -338,7 +342,7 @@ function openPick(p) {
 function fillPickerSelect(sel, value, placeholder) {
   const opts = [];
   if (placeholder) { const o = new Option(placeholder, ''); o.disabled = true; opts.push(o); }
-  for (const c of [...PICKERS, ...MASTERS]) opts.push(new Option(c, c));
+  for (const p of team) if (p.aktiv) opts.push(new Option(p.kuerzel, p.kuerzel));
   if (value && !opts.some(o => o.value === value)) opts.push(new Option(value, value)); // Kürzel, das es nicht mehr gibt
   sel.replaceChildren(...opts);
   sel.value = value || '';
@@ -936,7 +940,7 @@ function showForm(r, file, idx = null) {
   $('form').scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 function closeForm() {
-  $('form').hidden = true; $('scan').hidden = false; $('bar').hidden = false; $('modeSwitch').hidden = !PICK_ENABLED;
+  $('form').hidden = true; $('scan').hidden = false; $('bar').hidden = false; $('modeSwitch').hidden = !modiSichtbar();
   editIdx = null;
   if (previewUrl) { URL.revokeObjectURL(previewUrl); previewUrl = null; }
   $('preview').removeAttribute('src');
@@ -1280,8 +1284,59 @@ if ('serviceWorker' in navigator && /^https?:$/.test(location.protocol)) navigat
 // Mit Server (SYNC): Das Handy wird einmal mit dem Lager-Code eingerichtet, Teamleiter-Passwörter prüft der
 // Server, und er lehnt Umteilen/Freigeben/Verwerfen ohne gültiges Teamleiter-Passwort ab.
 // Ohne Server: alles nur im Browser (Passwort Kürzel + "4567"), kein Schutz gegen jemanden, der den Quelltext liest.
-const PICKERS = ['AA', 'DR', 'SB', 'UB', 'RW']; // weitere Kürzel hier ergänzen
-const MASTERS = ['CMue', 'MD']; // mit Server: Passwort in supabase/zugang.sql, sonst Kürzel + "4567"
+// Wer sich anmelden darf, pflegt der Hauptadmin in der App (Team verwalten, team.js); mit Server liegt die Liste in
+// lb_personen und wird hier zwischengespeichert, damit das Gate auch offline die richtigen Kürzel zeigt.
+const PICKERS = ['AA', 'DR', 'SB', 'UB', 'RW']; // Startbestand, bis die Teamliste da ist (mit Server: supabase/setup.sql)
+const MASTERS = ['CMue', 'MD']; // der erste ist Hauptadmin
+const KEY_TEAM = 'lagerbuddy_team_v1';
+const BEREICHE = [ // [Bereich, Anzeige, Knopf, Modus]
+  ['erfassen', 'Erfassen', 'modeScan', 'scan'], ['pickliste', 'Pickliste', 'modePick', 'pick'], ['lager', 'Lager', 'modeLager', 'lager']];
+const ALLE_BEREICHE = BEREICHE.map(b => b[0]);
+const ROLLEN = { picker: 'Picker', admin: 'Teamleiter', hauptadmin: 'Hauptadmin' };
+const startTeam = () => [...MASTERS, ...PICKERS].map((k, i) => ({
+  kuerzel: k, name: '', rolle: i === 0 ? 'hauptadmin' : i < MASTERS.length ? 'admin' : 'picker', bereiche: ALLE_BEREICHE, aktiv: true }));
+// nur Einträge in der erwarteten Form übernehmen (Cache oder Server)
+const teamOk = t => Array.isArray(t) && t.length > 0 && t.every(p => p && typeof p.kuerzel === 'string' && ROLLEN[p.rolle]
+  && Array.isArray(p.bereiche) && typeof p.aktiv === 'boolean');
+let team = (() => { try { const t = JSON.parse(localStorage.getItem(KEY_TEAM)); if (teamOk(t)) return t; } catch {} return startTeam(); })();
+const person = k => team.find(p => p.kuerzel === k);
+function teamSpeichern() { try { localStorage.setItem(KEY_TEAM, JSON.stringify(team)); } catch {} }
+let teamGeladen = 0;
+async function ladeTeam(jetzt) {
+  if (!SYNC_ON || !lager || (!jetzt && Date.now() - teamGeladen < 60000)) return;
+  teamGeladen = Date.now();
+  try {
+    const t = await rpc('lb_personen_liste', { lager });
+    if (!teamOk(t) || JSON.stringify(t) === JSON.stringify(team)) return;
+    team = t; teamSpeichern(); teamGeaendert();
+  } catch (err) { if (err.kind === 'zugang') lagerUngueltig(); }
+}
+// Teamliste hat sich geändert: Gate neu, und wer gerade angemeldet ist, bekommt seine neuen Bereiche -- oder muss
+// sich neu anmelden, wenn er deaktiviert wurde oder eine andere Rolle hat.
+function teamGeaendert() {
+  buildGate();
+  if (!picker || !$('gate').hidden) return;
+  const p = person(picker);
+  if (!p || !p.aktiv || (p.rolle === 'picker') !== (role !== 'master')) {
+    toast('Ihr Zugang wurde geändert. Bitte neu anmelden.');
+    tlAuth = null; picker = ''; role = ''; rang = '';
+    showGate(); return;
+  }
+  rang = p.rolle; bereiche = p.bereiche;
+  applyRoleUI();
+  if (mode === 'team') renderTeam();
+}
+const erlaubt = m => m === 'team' ? rang === 'hauptadmin' : BEREICHE.some(b => b[3] === m && bereiche.includes(b[0]));
+const modiSichtbar = () => PICK_ENABLED && BEREICHE.filter(b => bereiche.includes(b[0])).length > 1;
+// Nur die Bereiche der Person als Knöpfe; ist der aktuelle Modus nicht (mehr) erlaubt, zum ersten erlaubten
+function applyBereiche() {
+  const an = BEREICHE.filter(b => bereiche.includes(b[0]));
+  for (const b of BEREICHE) $(b[2]).hidden = !bereiche.includes(b[0]);
+  $('modeSwitch').dataset.n = an.length;
+  if ($('form').hidden) $('modeSwitch').hidden = !modiSichtbar();
+  $('teamBtn').hidden = rang !== 'hauptadmin';
+  if (!erlaubt(mode)) { if (!$('form').hidden) closeForm(); setMode(an[0]?.[3] || 'scan'); }
+}
 const LOCK_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>';
 
 function showGate() {
@@ -1291,6 +1346,7 @@ function showGate() {
   $('gate').hidden = false;
   closeTlForm();
   if (einrichten) setTimeout(() => $('lagerCode').focus(), 50);
+  else ladeTeam(true);
 }
 function lagerUngueltig() {
   if (!lager) return;
@@ -1315,7 +1371,7 @@ $('lagerForm').onsubmit = async ev => {
 
 // Picker mit zugeteilter offener Pickliste landen direkt dort (bei genau einer gleich in der Liste)
 function landen() {
-  const open = role === 'master' ? [] : visiblePicks().filter(p => !pickDone(p));
+  const open = role === 'master' || !erlaubt('pick') ? [] : visiblePicks().filter(p => !pickDone(p));
   if (!open.length) return false;
   setMode('pick');
   if (open.length === 1) openPick(open[0]);
@@ -1323,12 +1379,18 @@ function landen() {
   return true;
 }
 let landenNachTour = false;
-function login(code, r) {
+// info: { rolle, bereiche } vom Server (Admins) -- sonst aus der Teamliste
+function login(code, r, info) {
+  const p = person(code);
   picker = code; role = r; landenNachTour = false;
+  rang = info?.rolle || p?.rolle || (r === 'master' ? 'admin' : 'picker');
+  bereiche = (info?.bereiche || p?.bereiche || ALLE_BEREICHE).filter(b => ALLE_BEREICHE.includes(b));
+  if (!bereiche.length) bereiche = ALLE_BEREICHE;
   if (r !== 'master') tlAuth = null;
   $('gate').hidden = true;
   if (!$('form').hidden) closeForm(); // halb erfasstes Etikett gehört dem vorherigen Nutzer
   openId = null; pick = null;
+  if (mode === 'team') setMode('scan'); // Verwaltung nie für den nächsten offen lassen
   renderPicker(); applyRoleUI();
   const gelandet = landen();
   // frisch vom Server holen; war lokal noch nichts da, danach nochmal schauen
@@ -1344,19 +1406,29 @@ function login(code, r) {
 let tlCode = null;
 function loginMaster(code) {
   tlCode = code;
-  for (const b of $('gateMasters').children) b.classList.toggle('active', b.textContent === code);
+  for (const b of $('gateMasters').children) b.classList.toggle('active', b.dataset.k === code);
   $('tlLabel').textContent = `Passwort für ${code}`;
-  $('tlUser').value = code;
+  $('tlUser').value = $('pwUser').value = code;
   $('tlPw').value = ''; $('tlErr').hidden = true;
-  $('tlForm').hidden = false;
+  $('pwForm').hidden = true; $('tlForm').hidden = false;
   setTimeout(() => $('tlPw').focus(), 50);
 }
 function closeTlForm() {
-  tlCode = null; $('tlForm').hidden = true; $('tlPw').value = '';
+  tlCode = null; pwWechsel = null;
+  $('tlForm').hidden = $('pwForm').hidden = true;
+  $('tlPw').value = $('pwNeu').value = $('pwNeu2').value = '';
   for (const b of $('gateMasters').children) b.classList.remove('active');
 }
 function tlFehler(msg) { $('tlErr').textContent = msg; $('tlErr').hidden = false; $('tlPw').select(); }
-$('tlCancel').onclick = closeTlForm;
+$('tlCancel').onclick = $('pwCancel').onclick = closeTlForm;
+// Anmelden mit Rolle und Bereichen; lb_anmelden fehlt nur, solange die Datenbank noch den alten Stand hat
+async function anmelden(code, pw) {
+  try { return await rpc('lb_anmelden', { lager, kuerzel: code, pw }); }
+  catch (err) {
+    if (err.kind !== 'server' || !/lb_anmelden/.test(err.message)) throw err;
+    return { ok: !!(await rpc('lb_teamleiter', { lager, kuerzel: code, pw })) };
+  }
+}
 $('tlForm').onsubmit = async ev => {
   ev.preventDefault();
   const code = tlCode, pw = $('tlPw').value;
@@ -1364,28 +1436,64 @@ $('tlForm').onsubmit = async ev => {
   if (!SYNC_ON) { if (pw.trim() === code + '4567') { closeTlForm(); login(code, 'master'); } else tlFehler('Falsches Passwort.'); return; }
   $('tlBtn').disabled = true;
   try {
-    const ok = await rpc('lb_teamleiter', { lager, kuerzel: code, pw });
+    const res = await anmelden(code, pw);
     if (tlCode !== code || $('gate').hidden) return; // während der Prüfung abgebrochen oder ein Picker hat sich angemeldet
-    if (!ok) { tlFehler('Falsches Passwort. Groß-/Kleinschreibung und Bindestriche sind egal.'); return; }
+    if (!res?.ok) { tlFehler('Falsches Passwort. Groß-/Kleinschreibung und Bindestriche sind egal.'); return; }
+    if (res.muss_aendern) { pwWechselStart(code, pw, res); return; }
     tlAuth = { kuerzel: code, pw };
     closeTlForm();
-    login(code, 'master');
+    login(code, 'master', res);
   } catch (err) {
     if (err.kind === 'zugang') { closeTlForm(); lagerUngueltig(); }
     else tlFehler('Keine Verbindung zum Server. Die Teamleiter-Anmeldung braucht Netz.');
   } finally { $('tlBtn').disabled = false; }
 };
+// Nach Anlegen oder Zurücksetzen durch den Hauptadmin: Startpasswort gilt nur für die erste Anmeldung
+let pwWechsel = null; // { code, alt, info }
+const pwNorm = s => String(s).replace(/[^0-9A-Za-z]/g, '').toUpperCase(); // wie lb_norm auf dem Server
+function pwWechselStart(code, alt, info) {
+  pwWechsel = { code, alt, info };
+  $('tlForm').hidden = true; $('pwForm').hidden = false; $('pwErr').hidden = true;
+  $('pwLabel').textContent = `Eigenes Passwort für ${code} festlegen`;
+  setTimeout(() => $('pwNeu').focus(), 50);
+}
+function pwFehler(msg) { $('pwErr').textContent = msg; $('pwErr').hidden = false; }
+$('pwForm').onsubmit = async ev => {
+  ev.preventDefault();
+  const w = pwWechsel, neu = $('pwNeu').value;
+  if (!w) return;
+  if (pwNorm(neu).length < 8) { pwFehler('Mindestens 8 Buchstaben oder Ziffern.'); return; }
+  if (pwNorm(neu) !== pwNorm($('pwNeu2').value)) { pwFehler('Die beiden Eingaben stimmen nicht überein.'); return; }
+  if (pwNorm(neu) === pwNorm(w.alt)) { pwFehler('Bitte ein anderes Passwort als das Startpasswort wählen.'); return; }
+  $('pwBtn').disabled = true;
+  try {
+    await rpc('lb_passwort_aendern', { lager, kuerzel: w.code, alt: w.alt, neu });
+    if (pwWechsel !== w || $('gate').hidden) return;
+    tlAuth = { kuerzel: w.code, pw: neu };
+    closeTlForm();
+    login(w.code, 'master', w.info);
+    toast('Passwort gespeichert. Ab jetzt mit dem neuen anmelden.');
+  } catch (err) {
+    if (err.kind === 'zugang') { closeTlForm(); lagerUngueltig(); }
+    else pwFehler(err.kind === 'server' ? 'Keine Verbindung zum Server.' : err.message);
+  } finally { $('pwBtn').disabled = false; }
+};
 function buildGate() {
-  const mk = (code, master) => {
+  const mk = (p, master) => {
     const b = document.createElement('button');
     b.className = 'btn' + (master ? ' gate-master' : ''); b.type = 'button';
+    b.dataset.k = p.kuerzel;
+    if (p.name) b.title = p.name;
     if (master) b.innerHTML = LOCK_ICON;
-    b.append(code);
-    b.onclick = () => master ? loginMaster(code) : login(code, 'picker');
+    b.append(p.kuerzel);
+    b.onclick = () => master ? loginMaster(p.kuerzel) : login(p.kuerzel, 'picker');
     return b;
   };
-  $('gatePickers').replaceChildren(...PICKERS.map(c => mk(c, false)));
-  $('gateMasters').replaceChildren(...MASTERS.map(c => mk(c, true)));
+  const aktiv = team.filter(p => p.aktiv);
+  $('gatePickers').replaceChildren(...aktiv.filter(p => p.rolle === 'picker').map(p => mk(p, false)));
+  $('gateMasters').replaceChildren(...aktiv.filter(p => p.rolle !== 'picker').map(p => mk(p, true)));
+  if (tlCode && !person(tlCode)?.aktiv) closeTlForm(); // gerade deaktiviert
+  else if (tlCode) for (const b of $('gateMasters').children) b.classList.toggle('active', b.dataset.k === tlCode);
 }
 function renderPicker() {
   $('pickerBtn').textContent = picker;
@@ -1398,6 +1506,7 @@ function applyRoleUI() {
   const isMaster = role === 'master';
   for (const id of ['pickChoose', 'pickReplace', 'pickClear']) $(id).hidden = !isMaster;
   $('pickHintMaster').hidden = !isMaster;
+  applyBereiche();
   if (mode === 'pick') renderPick(); // Charge-Felder/Freigabe-Knopf/Picker-Auswahl/untere Leiste hängen an der Rolle
 }
 buildGate();
@@ -1406,6 +1515,6 @@ recompute();
 showGate();
 if (window.__testLogin) login(window.__testLogin.code, window.__testLogin.role); // nur für die Testsuite, siehe fixtures.mjs
 
-$('modeSwitch').hidden = !PICK_ENABLED;
+$('modeSwitch').hidden = !modiSichtbar();
 render();
 setTimeout(checkUpdate, 1500);
