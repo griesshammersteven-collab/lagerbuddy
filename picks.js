@@ -36,7 +36,8 @@ function applyOp(doc, op) {
       if (l && !l.scans.some(s => s.ts === op.scan.ts && s.picker === op.scan.picker)) {
         l.scans.push(op.scan);
         // anzahl > 1: Sammelbuchung -- ein Gebinde gescannt, weitere gleiche vom Picker bestätigt
-        l.picked = Math.round((l.picked + op.scan.menge * (op.scan.anzahl || 1)) * 1000) / 1000; // 0,1 + 0,2 kg ohne Gleitkomma-Rest
+        // Einbuchen (am Ziel einlagern) ändert nicht, was gepickt ist -- nur Ausbuchen aus dem Lagerplatz zählt
+        if (op.scan.richtung !== 'ein') l.picked = Math.round((l.picked + op.scan.menge * (op.scan.anzahl || 1)) * 1000) / 1000; // 0,1 + 0,2 kg ohne Gleitkomma-Rest
       }
       break;
     }

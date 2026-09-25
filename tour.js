@@ -51,6 +51,7 @@ const TOUR_PICKER = [
   { ziel: '#camBtn', vor: () => tourListe('tour-a'), titel: 'Gebinde scannen', text: 'Das Etikett jedes Gebindes fotografieren. Die App liest Artikel und Charge per Barcode und schlägt sofort Alarm, wenn etwas nicht zur Position passt.' },
   { ziel: '.f:has(#menge)', vor: tourFormular, titel: 'Die App merkt sich die Menge', text: 'Beim ersten Gebinde geben Sie Menge und Einheit ein, danach ist beides vorausgefüllt. Nur bei einem Anbruch anpassen.' },
   { ziel: '#anzahlRow', vor: tourFormular, titel: 'Viele gleiche Gebinde? Einmal scannen', text: 'Ein Gebinde scannen, bei der Anzahl „Alle“ tippen, bestätigen – fertig. Die Sammelbuchung läuft auf Ihr Kürzel: Mit OK bestätigen Sie, alle Gebinde geprüft zu haben.' },
+  { ziel: '#lpRow', vor: tourFormular, titel: 'Lagerplatz und Ein/Aus', text: 'Dann den Lagerplatz scannen (Barcode oder die Nummer darunter) und wählen: „Ausbuchen“ beim Holen aus dem Regal, „Einbuchen“ beim Einlagern am Ziel. Der Bestand je Lagerplatz rechnet mit.' },
   { ziel: '.pick-skip-btn', vor: () => tourListe('tour-a'), titel: 'Ware nicht da?', text: 'Position überspringen und mit der nächsten weitermachen. Am Ende gibt der Teamleiter die fehlende Ware frei.' },
   { ziel: '#syncState', nur: () => SYNC_ON, vor: () => tourListe('tour-a'), titel: 'Immer abgeglichen', text: 'Jede Buchung geht sofort an den Teamleiter. Kein Netz? Die App sammelt die Buchungen und schickt sie nach.' },
   { ziel: '#tourBtn', vor: tourUebersicht, titel: 'Fragen?', text: 'Diesen Rundgang starten Sie jederzeit wieder über das Fragezeichen. Viel Erfolg beim Picken!' },
@@ -70,6 +71,7 @@ const TOUR_MASTER = [
   { ziel: '#pickExport', vor: () => tourListe('tour-b'), titel: 'Ergebnis als Excel', text: 'Fertige Listen als Excel: Soll und Ist je Position plus jede Buchung mit Picker, Charge und Uhrzeit.' },
   { ziel: '#bar', vor: () => tourListe('tour-b'), titel: 'Ersetzen oder verwerfen', text: 'Liste per Excel neu einlesen oder ganz verwerfen – das dürfen nur Teamleiter.' },
   { ziel: '#syncState', nur: () => SYNC_ON, vor: () => tourListe('tour-a'), titel: 'Live mit allen Handys', text: 'Alle Handys gleichen sich alle paar Sekunden ab. Umteilen, Freigeben und Verwerfen prüft der Server über Ihr Teamleiter-Passwort.' },
+  { ziel: '#modeLager', vor: tourUebersicht, titel: 'Lager und Bestand', text: 'Hier sehen Sie den Bestand je Lagerplatz, buchen Wareneingang vom Lieferanten ein und laden Bestand und alle Buchungen als Excel herunter.' },
   { ziel: '#tourBtn', vor: tourUebersicht, titel: 'Jederzeit wieder', text: 'Über das Fragezeichen starten Sie diesen Rundgang erneut. Die Picker haben ihren eigenen.' },
 ];
 

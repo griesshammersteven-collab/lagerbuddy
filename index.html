@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'sha256-dweVEr7N1Osh0G9fvuALASyN8MmTjcK9BJdo80RgwZA='; img-src 'self' blob:; connect-src 'self' blob: data: https://*.supabase.co; worker-src 'self' blob:; manifest-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'sha256-p0UYmqRTsKgdjAudNoaAXzuLogaFiKr90U9Qs6lKIRA='; img-src 'self' blob:; connect-src 'self' blob: data: https://*.supabase.co; worker-src 'self' blob:; manifest-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'">
 <meta name="referrer" content="no-referrer">
 <meta name="theme-color" content="#0B4F82">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -65,6 +65,22 @@ h2{font-size:15px;color:var(--mute);font-weight:600;margin:24px 0 8px;text-trans
 .pick-now{color:var(--green);font-size:13px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;margin-bottom:4px}
 .pick-note{color:var(--warn);font-weight:600}
 .pick-gebinde{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-top:6px}
+#modeSwitch{grid-template-columns:repeat(3,1fr)}
+.f .file{width:1px;height:1px;min-height:0;padding:0;border:0} /* versteckte Datei-/Auswahlfelder nicht wie Eingabefelder aufziehen */
+.lp-row{display:grid;grid-template-columns:1fr auto;gap:10px}
+.lp-row input{min-width:0;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.5px}
+.lp-row .btn{width:auto}
+.lager-info{margin-bottom:6px}
+.lager-info .pick-hint{margin:6px 0 0}
+.suche{width:100%;min-height:44px;padding:8px 12px;margin-bottom:10px;border-radius:10px;border:1px solid var(--line);background:#041019;color:var(--text);font:inherit;font-size:16px}
+#bestandList{list-style:none;margin:0 0 12px;padding:0;display:grid;gap:8px}
+.lp-head{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-weight:700;font-size:16px;color:var(--green);margin-bottom:4px}
+.lp-item{display:flex;justify-content:space-between;gap:10px;padding:6px 0;border-top:1px solid var(--line)}
+.lp-item:first-of-type{border-top:0}
+.lp-item .nums{font-size:15px}
+.lp-menge{font-weight:700;white-space:nowrap;text-align:right}
+.lp-item.neg .lp-menge{color:var(--err)}
+.lp-warn{color:var(--warn);font-size:13px;font-weight:600}
 .pick-ba{margin-top:10px;padding:10px 12px;border-radius:10px;border:1px solid #e6953a88;background:#e6953a14}
 .pick-ba.ok{border-color:#5cb85c66;background:#5cb85c12}
 .pick-ba-head{display:flex;justify-content:space-between;gap:8px;font-size:13px;font-weight:700;color:var(--warn)}
@@ -197,6 +213,7 @@ h2{font-size:15px;color:var(--mute);font-weight:600;margin:24px 0 8px;text-trans
   <div class="row mode" id="modeSwitch" hidden>
     <button class="btn mode-btn active" type="button" id="modeScan" aria-pressed="true">Erfassen</button>
     <button class="btn mode-btn" type="button" id="modePick" aria-pressed="false">Pickliste</button>
+    <button class="btn mode-btn" type="button" id="modeLager" aria-pressed="false">Lager</button>
   </div>
 
   <section id="scan">
@@ -220,7 +237,7 @@ h2{font-size:15px;color:var(--mute);font-weight:600;margin:24px 0 8px;text-trans
     <div class="f"><label for="bez1">Bezeichnung 1 <span class="tag" id="t-bez1"></span></label><input id="bez1" name="bez1" maxlength="200"></div>
     <div class="f"><label for="bez2">Bezeichnung 2 <span class="tag" id="t-bez2"></span></label><input id="bez2" name="bez2" maxlength="200"></div>
     <div class="f"><label for="charge">Charge <span class="tag" id="t-charge"></span></label><input id="charge" name="charge" autocapitalize="off" spellcheck="false" maxlength="64"></div>
-    <div class="f"><label for="lagerplatz">Lagerplatz <span class="sub">optional</span></label><input id="lagerplatz" name="lagerplatz" autocapitalize="characters" maxlength="40" placeholder="z. B. B4 oder Bühl"></div>
+    <div class="f" id="lpFreiRow"><label for="lagerplatz">Lagerplatz <span class="sub">optional</span></label><input id="lagerplatz" name="lagerplatz" autocapitalize="characters" maxlength="40" placeholder="z. B. B4 oder Bühl"></div>
     <div class="f"><label for="menge">Menge pro Gebinde <span class="tag" id="t-menge"></span></label><input id="menge" name="menge" type="text" inputmode="decimal" placeholder="z. B. 24 oder 12,5"></div>
     <div class="row unit">
       <label class="btn"><input class="file" type="radio" name="einheit" value="Stück"> Stück</label>
@@ -233,6 +250,23 @@ h2{font-size:15px;color:var(--mute);font-weight:600;margin:24px 0 8px;text-trans
         <input id="anzahl" type="text" inputmode="numeric" value="1" maxlength="4" aria-label="Anzahl gleicher Gebinde">
         <button class="btn" type="button" id="anzPlus" aria-label="Ein Gebinde mehr">+</button>
         <button class="btn" type="button" id="anzAlle" hidden></button>
+      </div>
+    </div>
+    <div class="f" id="lpRow" hidden>
+      <label for="lpCode">Lagerplatz <span class="tag" id="t-lp"></span></label>
+      <div class="lp-row">
+        <input id="lpCode" autocapitalize="characters" autocomplete="off" spellcheck="false" maxlength="20" placeholder="z. B. H3.01.01.00.01">
+        <label class="btn" id="lpBtn">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 7V5a2 2 0 0 1 2-2h2"/><path d="M17 3h2a2 2 0 0 1 2 2v2"/><path d="M21 17v2a2 2 0 0 1-2 2h-2"/><path d="M7 21H5a2 2 0 0 1-2-2v-2"/><path d="M7 8v8"/><path d="M11 8v8"/><path d="M14 8v8"/><path d="M17 8v8"/></svg>
+          Scannen<input class="file" type="file" accept="image/*" capture="environment" id="lpCam">
+        </label>
+      </div>
+    </div>
+    <div class="f" id="richtungRow" hidden>
+      <label>Buchung <span class="tag" id="t-richtung"></span></label>
+      <div class="row unit richtung">
+        <label class="btn"><input class="file" type="radio" name="richtung" value="aus"> Ausbuchen</label>
+        <label class="btn"><input class="file" type="radio" name="richtung" value="ein"> Einbuchen</label>
       </div>
     </div>
     <button class="btn primary" type="submit" id="formSubmit">Zur Liste hinzufügen</button>
@@ -285,6 +319,18 @@ h2{font-size:15px;color:var(--mute);font-weight:600;margin:24px 0 8px;text-trans
       <ul id="pickList"></ul>
     </div>
   </div>
+  <div id="lagerView" hidden>
+    <p class="sync-state" id="lagerSync" role="status" hidden></p>
+    <div class="card lager-info">
+      <b>Einbuchen und Ausbuchen</b>
+      <p class="pick-hint">Gebinde-Etikett fotografieren, dann den Lagerplatz scannen und „Einbuchen“ (z. B. Wareneingang vom Lieferanten) oder „Ausbuchen“ wählen. Umlagern für eine Pickliste geht direkt in der Pickliste.</p>
+    </div>
+    <h2>Bestand <span id="bestandCount"></span></h2>
+    <input id="bestandSuche" class="suche" type="search" placeholder="Suchen: Lagerplatz, Artikel oder Charge" autocomplete="off" spellcheck="false" aria-label="Bestand durchsuchen">
+    <ul id="bestandList"></ul>
+    <p class="empty" id="bestandLeer">Noch nichts eingebucht.</p>
+    <button class="btn" type="button" id="bestandExport" hidden>Bestand und Buchungen als Excel</button>
+  </div>
 </main>
 
 <div class="bar" id="bar">
@@ -315,9 +361,10 @@ h2{font-size:15px;color:var(--mute);font-weight:600;margin:24px 0 8px;text-trans
 </div>
 <div id="toast" role="status" aria-live="polite"></div>
 
-<script src="parse.js?v=2026-09-25.3"></script>
-<script src="picks.js?v=2026-09-25.3"></script>
-<script src="app.js?v=2026-09-25.3"></script>
-<script src="tour.js?v=2026-09-25.3"></script>
+<script src="parse.js?v=2026-09-25.4"></script>
+<script src="picks.js?v=2026-09-25.4"></script>
+<script src="app.js?v=2026-09-25.4"></script>
+<script src="lager.js?v=2026-09-25.4"></script>
+<script src="tour.js?v=2026-09-25.4"></script>
 </body>
 </html>

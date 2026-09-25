@@ -266,6 +266,47 @@ function skewAngle(rgba, W, H, maxDeg = 12) {
   return Math.round(best * 10) / 10;
 }
 
+// Barcode-Balken vor der Texterkennung entfernen (Lagerplatz-Etikett: Barcode, darunter "H3.01.01.00.01"). Tesseract
+// hält die Balken für Text und liest dann gar nichts -- ohne Balken kommt die Nummer mit ~90 % (Foto 25.09.2026).
+// Balken = senkrechte Tintenläufe, deutlich länger als jeder Ziffernstrich: Grenze ist 60 % der längsten Läufe im Bild
+// (95. Perzentil), damit es für die Nahaufnahme eines Etiketts genauso passt wie für ein ganzes Blatt.
+// Ohne Barcode im Bild sind die längsten Läufe die Ziffern selbst -- deshalb nur als zweiter Versuch einsetzen.
+// rgba: ImageData.data, Ergebnis: neues RGBA-Bild, Schrift schwarz auf weiß, Balken weiß.
+function stripBars(rgba, W, H) {
+  const ink = inkMask(rgba, W, H), runs = [], min = Math.max(4, Math.round(H * 0.01));
+  const colRuns = x => {
+    const out = [];
+    for (let y = 0; y < H; y++) {
+      if (!ink[y * W + x]) continue;
+      let e = y;
+      while (e + 1 < H && (ink[(e + 1) * W + x] || (e + 2 < H && ink[(e + 2) * W + x]))) e++; // 1 Pixel Lücke überbrücken
+      if (e - y + 1 >= min) out.push([y, e]);
+      y = e;
+    }
+    return out;
+  };
+  const perCol = [];
+  for (let x = 0; x < W; x++) { const r = colRuns(x); perCol.push(r); for (const [a, b] of r) runs.push(b - a + 1); }
+  const out = new Uint8ClampedArray(W * H * 4);
+  for (let p = 0; p < W * H; p++) { const v = ink[p] ? 0 : 255; out.set([v, v, v, 255], p * 4); }
+  if (runs.length < 20) return out;
+  runs.sort((a, b) => a - b);
+  const lim = 0.6 * runs[Math.floor(runs.length * 0.95)];
+  for (let x = 0; x < W; x++) for (const [a, b] of perCol[x]) if (b - a + 1 >= lim)
+    for (let y = Math.max(0, a - 2); y <= Math.min(H - 1, b + 2); y++) out.set([255, 255, 255, 255], (y * W + x) * 4);
+  return out;
+}
+
+// Lagerplatz: Halle + Nummer, dann vier Zweiergruppen -- "H3.01.01.00.01" (fortlaufend ab H1). Aus Barcode oder Text;
+// die Texterkennung liest Punkte auch als Komma/Doppelpunkt und 0 als O -- das wird hier geradegezogen.
+const LAGERPLATZ = /^[A-Z]\d{1,3}(\.\d{2}){4}$/;
+function findLagerplatz(text) {
+  // nur hinter Ziffer/Punkt umdeuten -- der Hallen-Buchstabe vorne bleibt, wie er ist
+  const t = String(text ?? '').toUpperCase().replace(/(?<=[\d.,:]\s?)O/g, '0').replace(/(?<=[\d.,:]\s?)[IL|]/g, '1');
+  const m = t.match(/[A-Z]\s?\d{1,3}(?:\s?[.,:;·]\s?\d{2}){4}/g) || [];
+  return [...new Set(m.map(s => s.replace(/\s/g, '').replace(/[,:;·]/g, '.')))].filter(s => LAGERPLATZ.test(s));
+}
+
 // Tabellenlinien vor der Texterkennung entfernen: die dicken Rasterlinien der Druck-Pickliste hält Tesseract
 // sonst für Text/Blöcke und liest dann fast nichts (echtes Foto 23.09.2026: 8 von 17 Werten, ohne Linien 14).
 // rgba: ImageData.data, Ergebnis: neues RGBA-Bild, Schrift schwarz auf weiß.
@@ -533,4 +574,4 @@ function applyPicklist(r, codes, lines) {
   return out;
 }
 
-if (typeof module !== 'undefined') module.exports = { parseDe, cleanLine, parseLabel, parsePicklist, applyPicklist, picklistGridFromWords, stripTableLines, skewAngle, verticalTextScore, gebindeCount, normArt, normCharge, requiredLabelColor, classifyLabelColor };
+if (typeof module !== 'undefined') module.exports = { parseDe, stripBars, findLagerplatz, LAGERPLATZ, cleanLine, parseLabel, parsePicklist, applyPicklist, picklistGridFromWords, stripTableLines, skewAngle, verticalTextScore, gebindeCount, normArt, normCharge, requiredLabelColor, classifyLabelColor };

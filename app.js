@@ -2,7 +2,7 @@
 /* LagerBuddy: Etikett fotografieren -> Barcodes + Text lokal auf dem Handy lesen -> Liste -> Excel.
    Alle Bibliotheken liegen in vendor/, kein Foto verlässt das Gerät. Nur Picklisten (Positionen, Zuteilung,
    Buchungen) werden über Supabase zwischen den Handys abgeglichen, wenn SYNC unten eingerichtet ist. */
-const APP_VERSION = '2026-09-25.3'; // bei JEDER Veröffentlichung erhöhen, genauso wie ?v= in index.html
+const APP_VERSION = '2026-09-25.4'; // bei JEDER Veröffentlichung erhöhen, genauso wie ?v= in index.html
 // Alte index.html (CDN/Offline-Speicher) mit neuerem app.js-Inhalt: dann fehlen Knöpfe und der Start bricht ab.
 // Einmal frisch laden (eindeutige URL geht am CDN vorbei), bevor irgendetwas verdrahtet wird.
 {
@@ -197,6 +197,7 @@ async function pushNow() {
       if (!res || res.ok) sync.pending = sync.pending.filter(p => !batch.includes(p));
       saveSync(); changed = true;
     }
+    if (typeof pushBewegungen === 'function') await pushBewegungen(); // Ein-/Ausbuchungen je Lagerplatz (lager.js)
     syncErr = '';
   } catch (err) { syncFailed(err); }
   finally {
@@ -243,6 +244,7 @@ setInterval(() => {
   if (!SYNC_ON || !lager || !picker || document.visibilityState !== 'visible' || tourDemo.length) return;
   if (mode !== 'pick' && Date.now() - lastSync < 30000) return;
   lastSync = Date.now(); syncNow(false);
+  if (mode === 'lager') ladeBestand(); // Buchungen der anderen Handys
 }, 5000);
 window.addEventListener('online', () => { if (picker) syncNow(false); });
 
@@ -250,7 +252,7 @@ function renderSyncState() {
   const el = $('syncState');
   el.hidden = !SYNC_ON;
   if (!SYNC_ON) return;
-  const n = sync.pending.length, warten = n === 1 ? '1 Änderung wartet' : `${n} Änderungen warten`;
+  const n = sync.pending.length + (typeof bew === 'undefined' ? 0 : bew.offen.length), warten = n === 1 ? '1 Änderung wartet' : `${n} Änderungen warten`;
   el.className = 'sync-state' + (syncErr || n ? ' warn' : '');
   el.textContent = syncErr === 'offline' ? `Offline – ${n ? warten + ' auf Netz' : 'zeigt den letzten Stand'}`
     : syncErr === 'zugang' ? 'Lager-Code ungültig – bitte neu anmelden'
@@ -301,19 +303,24 @@ function render() {
 /* ---------- Modus (Erfassen / Pickliste) ---------- */
 function setMode(m) {
   mode = m;
-  $('modeScan').classList.toggle('active', m === 'scan');
-  $('modeScan').setAttribute('aria-pressed', String(m === 'scan'));
-  $('modePick').classList.toggle('active', m === 'pick');
-  $('modePick').setAttribute('aria-pressed', String(m === 'pick'));
+  for (const [id, k] of [['modeScan', 'scan'], ['modePick', 'pick'], ['modeLager', 'lager']]) {
+    $(id).classList.toggle('active', m === k);
+    $(id).setAttribute('aria-pressed', String(m === k));
+  }
   $('freeListView').hidden = m !== 'scan';
   $('pickView').hidden = m !== 'pick';
+  $('lagerView').hidden = m !== 'lager';
   $('exportBar').hidden = m !== 'scan';
   $('pickBar').hidden = true; // im Pickliste-Modus entscheidet renderPick
-  if (m === 'pick') renderPick();
-  else { $('scan').hidden = false; $('galBtn').hidden = $('manual').hidden = false; $('camText').textContent = 'Etikett fotografieren'; }
+  if (m === 'pick') { renderPick(); return; }
+  // Erfassen und Lager: Wareneingang kommt mit fremden Etiketten (oft ohne unsere Barcodes) -- Galerie/von Hand für alle
+  $('scan').hidden = false; $('galBtn').hidden = $('manual').hidden = false;
+  $('camText').textContent = m === 'lager' ? 'Gebinde ein- oder ausbuchen' : 'Etikett fotografieren';
+  if (m === 'lager') { renderLager(); ladeBestand(); }
 }
 $('modeScan').onclick = () => setMode('scan');
 $('modePick').onclick = () => setMode('pick');
+$('modeLager').onclick = () => setMode('lager');
 
 /* ---------- Pickliste ---------- */
 // Teamleiter lädt eine Pickliste und teilt sie einem Picker zu; der Picker sieht nach seiner Anmeldung nur die
@@ -413,13 +420,14 @@ function renderPick() {
     const geb = gebindeCount(l.required, l.gebinde);
     prog.textContent = (l.charge ? `Charge ${l.charge} · ` : '') + `${fmtN(l.picked)} / ${fmtN(l.required)} ${l.einheit}` +
       (geb ? ` · ≈ ${fmtN(geb)} Gebinde à ${fmtN(l.gebinde)} ${l.einheit}` : '');
-    const zahl = x => x.anzahl || 1, auto = l.scans.filter(x => !x.manuell);
-    const nScan = auto.reduce((s, x) => s + zahl(x), 0), nHand = l.scans.filter(x => x.manuell).reduce((s, x) => s + zahl(x), 0);
+    const zahl = x => x.anzahl || 1, aus = l.scans.filter(x => x.richtung !== 'ein'), auto = aus.filter(x => !x.manuell);
+    const nScan = auto.reduce((s, x) => s + zahl(x), 0), nHand = aus.filter(x => x.manuell).reduce((s, x) => s + zahl(x), 0);
+    const nEin = l.scans.filter(x => x.richtung === 'ein').reduce((s, x) => s + zahl(x), 0);
     const sammel = auto.filter(x => x.anzahl > 1), nBest = sammel.reduce((s, x) => s + x.anzahl - 1, 0);
     const count = document.createElement('div'); count.className = 'sub pick-count';
     count.textContent = (geb ? `Gebinde gescannt: ${nScan} von ${fmtN(geb)}` : `Gebinde gescannt: ${nScan}`) +
       (nBest ? ` · davon ${nBest} per Sammelbuchung (${[...new Set(sammel.map(x => x.picker || '–'))].join(', ')})` : '') +
-      (nHand ? ` · ${nHand}× von Hand (Teamleiter)` : '');
+      (nHand ? ` · ${nHand}× von Hand (Teamleiter)` : '') + (nEin ? ` · eingelagert: ${nEin}` : '');
     li.append(head, prog, count);
     if (l.hinweis) { const n = document.createElement('div'); n.className = 'sub pick-note'; n.textContent = l.hinweis; li.append(n); }
     li.append(baBlock(l, i, l === cur && !isDone));
@@ -570,6 +578,10 @@ function addPick(e) {
   const line = currentPickLine();
   const sameArt = l => normArt(l.artikel) === normArt(e.artikel);
   if (!lines.some(sameArt)) { toast('Dieser Artikel steht nicht auf der Pickliste.'); return; }
+  // Umlagern: Ausbuchen = aus dem Lagerplatz holen (zählt als gepickt), Einbuchen = am Ziel einlagern (eigener Zähler)
+  const lp = lpWert(); if (!lp) return; // der Reihe nach: erst Lagerplatz, dann Ein/Aus -- ein Hinweis zur Zeit
+  const richtung = richtungWert(); if (!richtung) return;
+  if (richtung === 'ein') { einPick(e, lp); return; }
   if (!line) { toast(pick.freigabe ? 'Die Pickliste ist schon freigegeben und abgeschlossen.' : 'Die Pickliste ist schon vollständig.'); return; }
   const nochmal = `Bitte der Reihe nach: zuerst ${line.artikel}${line.charge ? ' · Charge ' + line.charge : ''} buchen.`;
   if (!sameArt(line)) { toast(nochmal); return; }
@@ -621,8 +633,10 @@ function addPick(e) {
         : `Mehr als ein Gebinde? Ein Gebinde hat ${fmtN(geb)} ${line.einheit}, erfasst wurden ${fmtN(e.menge)} ${e.einheit}. Trotzdem buchen?`) +
         (korrigieren ? '\n\n' + korrigieren.trim() : ''))) return;
   const scan = { ts: e.ts, menge: e.menge, charge: e.charge, picker: e.picker, ...(anzahl > 1 ? { anzahl } : {}),
-    ...(scanned ? { fp: scanned.fp } : {}), ...(manuell ? { manuell: true } : {}) };
+    ...(scanned ? { fp: scanned.fp } : {}), ...(manuell ? { manuell: true } : {}), lagerplatz: lp, richtung: 'aus' };
   if (!commit(pick.id, { t: 'scan', lid: line.lid, scan })) return;
+  const bestandHinweis = lagerBewegung({ ts: e.ts, lagerplatz: lp, richtung: 'aus', quelle: 'pickliste', pick_id: pick.id, artikel: line.artikel,
+    bez: line.bez || e.bez1 || '', charge: e.charge || line.charge || '', menge: e.menge * anzahl, gebinde: anzahl, einheit: line.einheit, picker: e.picker });
   // Gebindegröße noch unbekannt: das erste gescannte Gebinde legt sie fest, ab dann gilt "ein Scan = ein Gebinde".
   // War eine Größe gemerkt (anderes Handy/andere Liste) und das erste Gebinde ist ein Anbruch, gilt die gemerkte.
   const vollGeb = geb && e.menge <= geb ? geb : e.menge;
@@ -630,9 +644,10 @@ function addPick(e) {
   if (!manuell) merken(line.artikel, line.gebinde || vollGeb, line.einheit, true); // an der Position festgelegt: gilt
   const l = pick.lines.find(x => x.lid === line.lid);
   renderPick(); closeForm();
-  toast(l.picked >= l.required
+  toast((l.picked >= l.required
     ? `Fertig: ${e.artikel} (${fmtN(l.picked)}/${fmtN(l.required)} ${l.einheit})`
-    : `Gebucht: ${anzahl > 1 ? anzahl + ' × ' : ''}${fmtN(e.menge)} ${e.einheit} für ${e.artikel} (${fmtN(l.picked)}/${fmtN(l.required)})`);
+    : `Gebucht: ${anzahl > 1 ? anzahl + ' × ' : ''}${fmtN(e.menge)} ${e.einheit} für ${e.artikel} (${fmtN(l.picked)}/${fmtN(l.required)})`) +
+    ` · aus ${lp}` + bestandHinweis);
 }
 // target: { replaceId } = Positionen dieser Liste ersetzen (Zuteilung bleibt), sonst neue Liste für target.fuer
 function applyParsedPicklist({ title, von, nach, lines, skipped }, sourceName, target, hinweis) {
@@ -905,7 +920,11 @@ function showForm(r, file, idx = null) {
     for (const el of document.getElementsByName('einheit')) el.checked = el.value === r.einheit;
     renderMengeTag();
   }
-  $('anzahlRow').hidden = !(mode === 'pick' && idx === null);
+  $('anzahlRow').hidden = !((mode === 'pick' || mode === 'lager') && idx === null);
+  const lpModus = (mode === 'pick' || mode === 'lager') && idx === null; // Pickliste/Lager: Lagerplatz + Ein/Aus Pflicht
+  $('lpRow').hidden = $('richtungRow').hidden = !lpModus;
+  $('lpFreiRow').hidden = lpModus;
+  if (lpModus) lpVorschlag(r);
   $('anzahl').value = '1';
   $('lagerplatz').value = r.lagerplatz || (mode === 'pick' && pick ? [pick.von, pick.nach].filter(Boolean).join(' → ') : '');
   if (previewUrl) URL.revokeObjectURL(previewUrl);
@@ -941,6 +960,7 @@ $('form').onsubmit = ev => {
   if (lc.kind === 'ok' || lc.kind === 'bad') e.etikett = lc.got; // erkannte Farbe mitschreiben
   const idx = editIdx;
   if (idx === null && mode === 'pick') { addPick(e); return; }
+  if (idx === null && mode === 'lager') { lagerBuchen(e); return; }
   if (!e.charge && !confirm(idx !== null ? 'Die Charge ist leer. Trotzdem speichern?' : 'Die Charge ist leer. Trotzdem hinzufügen?')) return;
   if (list.some((x, j) => j !== idx && x.artikel === e.artikel && x.charge === e.charge) &&
       !confirm('Artikel und Charge sind schon in der Liste. Trotzdem nochmal hinzufügen?')) return;
@@ -980,7 +1000,7 @@ async function toCanvas(file, maxDim = 2000) {
 }
 
 let zxPrepared = false;
-async function readCodes(canvas) {
+async function readCodes(canvas, formats = ['Code39'], max = 4) {
   await loadScript('zxing/zxing-reader.js');
   if (!zxPrepared) {
     ZXingWASM.prepareZXingModule({ overrides: { locateFile: (p, pre) => p.endsWith('.wasm') ? LOCAL + 'zxing/' + p : pre + p } });
@@ -991,7 +1011,7 @@ async function readCodes(canvas) {
   try {
     // formats: 'Code39' -- diese Etiketten nutzen nur Code39; das vermeidet auch, dass ein EAN auf dem
     // Karton daneben versehentlich als Artikel- oder Chargennummer gelesen wird
-    res = await ZXingWASM.readBarcodes(img, { formats: ['Code39'], tryHarder: true, maxNumberOfSymbols: 4 });
+    res = await ZXingWASM.readBarcodes(img, { formats, tryHarder: true, maxNumberOfSymbols: max });
   } catch (err) {
     ZXingWASM.purgeZXingModule(); zxPrepared = false; // Modul bleibt nach einem Ladefehler sonst für die Sitzung kaputt
     throw err;
@@ -1187,23 +1207,24 @@ async function exportPick(p) {
       ['Exportiert', `${dt(Date.now())} von ${picker}`],
       [],
       ['Pos.', 'BA-Nr. (Kunde)', 'Artikelnummer', 'Bezeichnung', 'Charge', 'Menge soll', 'Menge gepickt', 'Differenz', 'Einheit', 'Gebindegröße',
-        'Gebinde gescannt', 'davon per Sammelbuchung bestätigt', 'Gebinde von Hand', 'Status', 'BA-Nr. geprüft', 'Hinweis'],
+        'Gebinde gescannt', 'davon per Sammelbuchung bestätigt', 'Gebinde von Hand', 'Status', 'BA-Nr. geprüft', 'Hinweis', 'Gebinde eingelagert'],
       ...p.lines.map((l, i) => {
-        const auto = l.scans.filter(x => !x.manuell);
+        const aus = l.scans.filter(x => x.richtung !== 'ein'), auto = aus.filter(x => !x.manuell);
+        const ein = l.scans.filter(x => x.richtung === 'ein').reduce((s, x) => s + (x.anzahl || 1), 0);
         return [i + 1, l.ba || '', l.artikel, l.bez || '', l.charge || '', l.required, r3(l.picked), r3(l.picked - l.required), l.einheit, l.gebinde ?? '',
-          auto.reduce((s, x) => s + (x.anzahl || 1), 0), auto.reduce((s, x) => s + (x.anzahl || 1) - 1, 0), l.scans.filter(x => x.manuell).reduce((s, x) => s + (x.anzahl || 1), 0),
-          status(l), l.baOk ? `${l.baOk.von || '–'}, ${dt(l.baOk.ts)}` : 'nicht geprüft', l.hinweis || ''];
+          auto.reduce((s, x) => s + (x.anzahl || 1), 0), auto.reduce((s, x) => s + (x.anzahl || 1) - 1, 0), aus.filter(x => x.manuell).reduce((s, x) => s + (x.anzahl || 1), 0),
+          status(l), l.baOk ? `${l.baOk.von || '–'}, ${dt(l.baOk.ts)}` : 'nicht geprüft', l.hinweis || '', ein];
       }),
     ];
     const art = x => (x.manuell ? 'von Hand' : x.anzahl > 1 ? `Sammelbuchung: 1 gescannt, ${x.anzahl - 1} vom Picker bestätigt` : 'Scan');
     const buchungen = [['Pos.', 'BA-Nr. (Kunde)', 'Artikelnummer', 'Charge soll', 'Charge gescannt', 'Gebinde', 'Menge je Gebinde', 'Menge gesamt', 'Einheit',
-      'Picker', 'Zeitpunkt', 'Buchung'],
+      'Picker', 'Zeitpunkt', 'Buchung', 'Lagerplatz', 'Ein/Aus'],
       ...p.lines.flatMap((l, i) => l.scans.map(x => ({ l, i, x }))).sort((a, b) => a.x.ts - b.x.ts)
         .map(({ l, i, x }) => [i + 1, l.ba || '', l.artikel, l.charge || '', x.charge || '', x.anzahl || 1, x.menge, r3(x.menge * (x.anzahl || 1)), l.einheit,
-          x.picker || '', dt(x.ts), art(x)])];
+          x.picker || '', dt(x.ts), art(x), x.lagerplatz || '', x.richtung === 'ein' ? 'eingebucht' : x.lagerplatz ? 'ausgebucht' : ''])];
     const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, textSheet(kopf, [16, 16, 18, 30, 16, 11, 13, 10, 8, 13, 15, 18, 15, 24, 22, 20]), 'Pickliste');
-    XLSX.utils.book_append_sheet(wb, textSheet(buchungen, [6, 16, 18, 16, 16, 8, 15, 13, 8, 10, 20, 44]), 'Buchungen');
+    XLSX.utils.book_append_sheet(wb, textSheet(kopf, [16, 16, 18, 30, 16, 11, 13, 10, 8, 13, 15, 18, 15, 24, 22, 20, 12]), 'Pickliste');
+    XLSX.utils.book_append_sheet(wb, textSheet(buchungen, [6, 16, 18, 16, 16, 8, 15, 13, 8, 10, 20, 44, 18, 12]), 'Buchungen');
     // Dateiname nur ASCII: Umlaute machen Ärger in Windows-Freigaben, Mail-Anhängen und beim Download selbst
     const slug = t => t.replace(/->|→/g, ' ').replace(/[äöüÄÖÜß]/g, c => ({ ä: 'ae', ö: 'oe', ü: 'ue', Ä: 'Ae', Ö: 'Oe', Ü: 'Ue', ß: 'ss' })[c])
       .normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^A-Za-z0-9-]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 60);

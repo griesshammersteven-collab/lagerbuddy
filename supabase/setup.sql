@@ -156,11 +156,107 @@ begin
   return jsonb_build_object('ok', true, 'row', to_jsonb(neu));
 end $$;
 
+-- ---------- Lager: Ein-/Ausbuchungen je Lagerplatz und Bestand ----------
+-- Jede Buchung ist eine Zeile, die nur angehängt und nie geändert wird; der Bestand je Lagerplatz ist die Summe
+-- (ein minus aus). Die id vergibt das Handy: kommt eine Buchung nach einem Netzabbruch doppelt an, zählt sie einmal.
+create table if not exists public.lb_bewegungen (
+  id text primary key,
+  ts timestamptz not null,                  -- Zeitpunkt der Buchung auf dem Handy
+  lagerplatz text not null,                 -- z. B. H3.01.01.00.01
+  artikel text not null,
+  bez text not null default '',
+  charge text not null default '',
+  menge numeric not null,                   -- Menge gesamt (je Gebinde x Anzahl)
+  gebinde integer not null,                 -- Anzahl Gebinde
+  einheit text not null,                    -- kg | Stück
+  richtung text not null,                   -- ein | aus
+  quelle text not null,                     -- pickliste | wareneingang | lager
+  pick_id text,
+  picker text not null default '',
+  erfasst timestamptz not null default clock_timestamp()
+);
+create index if not exists lb_bewegungen_platz on public.lb_bewegungen (lagerplatz);
+create index if not exists lb_bewegungen_ts on public.lb_bewegungen (ts);
+alter table public.lb_bewegungen enable row level security;
+revoke all on table public.lb_bewegungen from anon, authenticated;
+
+-- intern: eine Buchung prüfen (einzeln statt mit "or" verkettet, damit kein Cast auf falschen Typ läuft)
+create or replace function public.lb_buchung_ok(b jsonb) returns boolean
+language plpgsql immutable set search_path = public as $$
+begin
+  if coalesce(jsonb_typeof(b), '') <> 'object' then return false; end if;
+  if coalesce(jsonb_typeof(b -> 'id'), '') <> 'string' or length(b ->> 'id') not between 1 and 100 then return false; end if;
+  if coalesce(b ->> 'lagerplatz', '') !~ '^[A-Z][0-9]{1,3}(\.[0-9]{2}){4}$' then return false; end if;
+  if coalesce(jsonb_typeof(b -> 'artikel'), '') <> 'string' or length(b ->> 'artikel') not between 1 and 64 then return false; end if;
+  if length(coalesce(b ->> 'charge', '')) > 64 or length(coalesce(b ->> 'bez', '')) > 200
+     or length(coalesce(b ->> 'picker', '')) > 20 or length(coalesce(b ->> 'pick_id', '')) > 64 then return false; end if;
+  if coalesce(jsonb_typeof(b -> 'menge'), '') <> 'number' or coalesce(jsonb_typeof(b -> 'gebinde'), '') <> 'number'
+     or coalesce(jsonb_typeof(b -> 'ts'), '') <> 'number' then return false; end if;
+  if (b ->> 'menge')::numeric <= 0 or (b ->> 'menge')::numeric > 10000000 then return false; end if;
+  if (b ->> 'gebinde')::numeric not between 1 and 10000 or (b ->> 'gebinde')::numeric <> floor((b ->> 'gebinde')::numeric) then return false; end if;
+  if coalesce(b ->> 'einheit', '') not in ('kg', 'Stück') or coalesce(b ->> 'richtung', '') not in ('ein', 'aus')
+     or coalesce(b ->> 'quelle', '') not in ('pickliste', 'wareneingang', 'lager') then return false; end if;
+  return true;
+end $$;
+
+-- Buchungen speichern (bis 200 auf einmal, z. B. nach Offline-Zeit). Doppelte ids werden übergangen.
+create or replace function public.lb_buchen(lager text, buchungen jsonb) returns integer
+language plpgsql volatile security definer set search_path = public, extensions as $$
+declare
+  b jsonb;
+  n integer := 0;
+  k integer;
+begin
+  perform public.lb_zugang(lager);
+  if coalesce(jsonb_typeof(buchungen), '') <> 'array' or jsonb_array_length(buchungen) > 200 then
+    raise exception 'lb_daten: ungültige Buchungen';
+  end if;
+  for b in select * from jsonb_array_elements(buchungen) loop
+    if not public.lb_buchung_ok(b) then raise exception 'lb_daten: ungültige Buchung'; end if;
+    insert into public.lb_bewegungen (id, ts, lagerplatz, artikel, bez, charge, menge, gebinde, einheit, richtung, quelle, pick_id, picker)
+    values (b ->> 'id', to_timestamp((b ->> 'ts')::numeric / 1000), b ->> 'lagerplatz', upper(b ->> 'artikel'), coalesce(b ->> 'bez', ''),
+      coalesce(b ->> 'charge', ''), (b ->> 'menge')::numeric, (b ->> 'gebinde')::integer, b ->> 'einheit', b ->> 'richtung',
+      b ->> 'quelle', nullif(b ->> 'pick_id', ''), coalesce(b ->> 'picker', ''))
+    on conflict (id) do nothing;
+    get diagnostics k = row_count;
+    n := n + k;
+  end loop;
+  return n;
+end $$;
+
+-- Bestand je Lagerplatz, Artikel und Charge (führende Nullen der Charge zählen nicht: 0001446028 = 1446028)
+create or replace function public.lb_bestand(lager text)
+returns table (lagerplatz text, artikel text, charge text, einheit text, bez text, menge numeric, gebinde bigint, zuletzt timestamptz)
+language plpgsql stable security definer set search_path = public, extensions as $$
+#variable_conflict use_column
+begin
+  perform public.lb_zugang(lager);
+  return query
+    select b.lagerplatz, b.artikel, max(b.charge), b.einheit, max(nullif(b.bez, '')),
+      sum(case when b.richtung = 'ein' then b.menge else -b.menge end),
+      sum(case when b.richtung = 'ein' then b.gebinde else -b.gebinde end)::bigint, max(b.ts)
+    from public.lb_bewegungen b
+    group by b.lagerplatz, b.artikel, ltrim(b.charge, '0'), b.einheit
+    having sum(case when b.richtung = 'ein' then b.menge else -b.menge end) <> 0
+    order by b.lagerplatz, b.artikel;
+end $$;
+
+-- Letzte Buchungen (Excel-Export), neueste zuerst, höchstens 10000
+create or replace function public.lb_bewegungen_liste(lager text, anzahl integer default 5000)
+returns setof public.lb_bewegungen
+language plpgsql stable security definer set search_path = public, extensions as $$
+begin
+  perform public.lb_zugang(lager);
+  return query select * from public.lb_bewegungen b order by b.ts desc limit least(greatest(coalesce(anzahl, 5000), 1), 10000);
+end $$;
+
 revoke all on function public.lb_ok(text, text), public.lb_zugang(text), public.lb_ist_tl(text, text), public.lb_norm(text),
-  public.lb_doc_ok(jsonb) from public, anon, authenticated;
+  public.lb_doc_ok(jsonb), public.lb_buchung_ok(jsonb) from public, anon, authenticated;
 revoke all on function public.lb_pruefen(text), public.lb_teamleiter(text, text, text),
   public.lb_liste(text, timestamptz), public.lb_speichern(text, text, jsonb, integer, text, text),
-  public.lb_loeschen(text, text, text, text) from public, authenticated; -- die App nutzt keine Supabase-Logins
+  public.lb_loeschen(text, text, text, text), public.lb_buchen(text, jsonb), public.lb_bestand(text),
+  public.lb_bewegungen_liste(text, integer) from public, authenticated; -- die App nutzt keine Supabase-Logins
 grant execute on function public.lb_pruefen(text), public.lb_teamleiter(text, text, text),
   public.lb_liste(text, timestamptz), public.lb_speichern(text, text, jsonb, integer, text, text),
-  public.lb_loeschen(text, text, text, text) to anon;
+  public.lb_loeschen(text, text, text, text), public.lb_buchen(text, jsonb), public.lb_bestand(text),
+  public.lb_bewegungen_liste(text, integer) to anon;

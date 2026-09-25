@@ -196,4 +196,20 @@ test('Kaputte Picklisten vom Server werden erkannt', () => {
     { lines: [{ lid: 'a', artikel: 'X', required: '1', picked: 0, scans: [] }] }]) assert.ok(!gueltig(d), JSON.stringify(d));
 });
 
+test('Lagerplatz aus Barcode/Text: Schema H3.01.01.00.01, Lesefehler geradegezogen', () => {
+  const { findLagerplatz } = require('./parse.js');
+  const want = { 'H3.01.01.00.01': ['H3.01.01.00.01'], 'h3,01.01.00.01': ['H3.01.01.00.01'], 'H3.0l.01.00.01': ['H3.01.01.00.01'],
+    'H3.O1.01.00.01': ['H3.01.01.00.01'], 'H3 . 01 . 01 . 00 . 01': ['H3.01.01.00.01'], 'H12.01.02.03.04': ['H12.01.02.03.04'],
+    'H3.01.01.00': [], '3.01.01.02.01 und H3.01.01.02.02': ['H3.01.01.02.02'], 'L3.01.01.00.01': ['L3.01.01.00.01'] };
+  for (const [k, v] of Object.entries(want)) assert.deepStrictEqual(findLagerplatz(k), v, k);
+});
+
+test('Umlagern: Einbuchen am Ziel ändert "gepickt" nicht, Ausbuchen schon', () => {
+  const d = run(base(), [
+    { t: 'scan', lid: 'a', scan: { ts: 60, menge: 25, anzahl: 2, picker: 'AA', lagerplatz: 'H3.01.01.00.01', richtung: 'aus' } },
+    { t: 'scan', lid: 'a', scan: { ts: 61, menge: 25, anzahl: 2, picker: 'AA', lagerplatz: 'H9.01.01.00.01', richtung: 'ein' } }]);
+  assert.strictEqual(d.lines[0].picked, 50);
+  assert.strictEqual(d.lines[0].scans.length, 2);
+});
+
 if (failed) { console.log(`\n${failed} Test(s) fehlgeschlagen`); process.exit(1); }
