@@ -2,7 +2,7 @@
 /* LagerBuddy: Etikett fotografieren -> Barcodes + Text lokal auf dem Handy lesen -> Liste -> Excel.
    Alle Bibliotheken liegen in vendor/, kein Foto verlässt das Gerät. Nur Picklisten (Positionen, Zuteilung,
    Buchungen) werden über Supabase zwischen den Handys abgeglichen, wenn SYNC unten eingerichtet ist. */
-const APP_VERSION = '2026-09-24.14'; // bei JEDER Veröffentlichung erhöhen, genauso wie ?v= in index.html
+const APP_VERSION = '2026-09-25.1'; // bei JEDER Veröffentlichung erhöhen, genauso wie ?v= in index.html
 // Alte index.html (CDN/Offline-Speicher) mit neuerem app.js-Inhalt: dann fehlen Knöpfe und der Start bricht ab.
 // Einmal frisch laden (eindeutige URL geht am CDN vorbei), bevor irgendetwas verdrahtet wird.
 {
@@ -422,6 +422,7 @@ function renderPick() {
       (nHand ? ` · ${nHand}× von Hand (Teamleiter)` : '');
     li.append(head, prog, count);
     if (l.hinweis) { const n = document.createElement('div'); n.className = 'sub pick-note'; n.textContent = l.hinweis; li.append(n); }
+    li.append(baBlock(l, i, l === cur && !isDone));
     if (!isDone && l.skipped) { const s = document.createElement('div'); s.className = 'sub pick-skip'; s.textContent = `Übersprungen von ${l.skipped.von || '–'}`; li.append(s); }
 
     // Artikelnummer/Charge/Menge korrigieren (v. a. nach dem Foto-Import) darf nur der Teamleiter
@@ -471,6 +472,61 @@ function renderPick() {
     return li;
   }));
 }
+// BA-Nr./Kunde je Position: kommt aus dem Foto/Excel (darf leer sein), der Picker prüft es gegen den Auftrag und
+// bestätigt mit "Geprüft" -- vor dem ersten Gebinde der Position. Wer als Picker etwas einträgt, hat damit geprüft;
+// ändert der Teamleiter, muss der Picker neu prüfen. Wer geprüft hat, steht an der Position und im Excel.
+function baBlock(l, i, istDran) {
+  const box = document.createElement('div');
+  box.className = 'pick-ba' + (l.baOk ? ' ok' : '');
+  const kopf = document.createElement('div'); kopf.className = 'pick-ba-head';
+  const titel = document.createElement('span'); titel.textContent = 'BA-Nr. / Kunde';
+  const stand = document.createElement('span');
+  stand.textContent = l.baOk ? `✓ geprüft von ${l.baOk.von || '–'}` : 'bitte prüfen';
+  kopf.append(titel, stand); box.append(kopf);
+  if (role === 'master' || istDran) {
+    const grid = document.createElement('div'); grid.className = 'pick-ba-grid';
+    const feld = (label, key) => {
+      const lab = document.createElement('label'); lab.append(label);
+      const inp = document.createElement('input');
+      inp.type = 'text'; inp.spellcheck = false; inp.maxLength = 60; inp.value = l[key] || ''; inp.placeholder = 'leer';
+      inp.setAttribute('aria-label', `${label} für Position ${i + 1} (${l.artikel})`);
+      inp.onchange = () => setBaFeld(l, key, inp.value);
+      lab.append(inp);
+      return lab;
+    };
+    grid.append(feld('BA-Nr.', 'ba'), feld('Kunde', 'kunde'));
+    box.append(grid);
+    if (!l.baOk) {
+      const ok = document.createElement('button');
+      ok.type = 'button'; ok.className = 'btn pick-ba-ok'; ok.textContent = '✓ Geprüft';
+      ok.onclick = () => { baGeprueft(l); renderPick(); };
+      box.append(ok);
+    }
+  } else {
+    const t = document.createElement('div'); t.className = 'pick-ba-text';
+    t.textContent = `BA-Nr. ${l.ba || '–'} · Kunde ${l.kunde || '–'}`;
+    box.append(t);
+  }
+  return box;
+}
+const baGeprueft = l => commit(pick.id, { t: 'feld', lid: l.lid, key: 'baOk', v: { von: picker, ts: Date.now() } });
+function setBaFeld(l, key, raw) {
+  const v = raw.trim().replace(/\s+/g, ' ').slice(0, 60);
+  if ((l[key] || '') === v) return;
+  commit(pick.id, { t: 'feld', lid: l.lid, key, v });
+  if (role === 'master') commit(pick.id, { t: 'feld', lid: l.lid, key: 'baOk', v: null }); // Picker prüft neu
+  else baGeprueft(l); // selbst eingetragen = geprüft
+  renderPick();
+}
+// Vor dem ersten Gebinde einer Position: BA-Nr./Kunde bestätigen lassen (OK = geprüft, auf das eigene Kürzel)
+function baBestaetigen(l) {
+  if (l.baOk) return true;
+  if (!confirm(`Erst BA-Nr. und Kunde prüfen (Position ${pick.lines.indexOf(l) + 1}, ${l.artikel}):\n\n` +
+    `BA-Nr.: ${l.ba || '– leer –'}\nKunde: ${l.kunde || '– leer –'}\n\n` +
+    `Stimmt das mit dem Auftrag überein? OK = geprüft (${picker}). Abbrechen = erst bei der Position korrigieren.`)) return false;
+  return baGeprueft(l);
+}
+
 // Positionen werden strikt der Reihe nach gebucht: immer die erste offene, die nicht übersprungen wurde.
 // Sind nur noch übersprungene offen, dürfen die nachgeholt werden -- bis ein Teamleiter die Liste freigibt.
 function currentPickLine() {
@@ -523,6 +579,7 @@ function addPick(e) {
     if (!confirm(`Falsche Charge? Erwartet ${line.charge}, erfasst ${e.charge || '–'}. Trotzdem buchen?`)) return;
   }
   if (line.einheit !== e.einheit) { toast(`Falsche Einheit: für diesen Artikel wird ${line.einheit} erwartet.`); return; }
+  if (!baBestaetigen(line)) return;
   // Gebinde-Pflicht: Picker buchen jedes Gebinde einzeln per Etikett-Scan (Artikel-Barcode muss erkannt sein).
   // Von Hand bucht nur der Teamleiter, als Notfall bei unlesbarem Etikett -- das bleibt an der Buchung sichtbar.
   const scanned = formScan, manuell = !scanned?.code;
@@ -1064,6 +1121,13 @@ async function scan(file) {
     if (canvas) { canvas.width = 0; canvas.height = 0; } // iOS begrenzt den Canvas-Speicher, sonst schlagen spätere Scans fehl
   }
 }
+$('camBtn').addEventListener('click', ev => {
+  const l = mode === 'pick' && pick && $('form').hidden ? currentPickLine() : null;
+  if (!l || l.baOk) return;
+  const geprueft = baBestaetigen(l);
+  renderPick(); // "geprüft von …" gleich zeigen bzw. Feld zum Korrigieren
+  if (!geprueft) { ev.preventDefault(); document.querySelector('.pick-line.current .pick-ba input')?.focus(); }
+});
 for (const id of ['cam', 'gal']) $(id).onchange = ev => { const f = ev.target.files[0]; ev.target.value = ''; scan(f); };
 
 /* ---------- Export ---------- */
@@ -1122,24 +1186,24 @@ async function exportPick(p) {
       ['Status', p.freigabe ? `abgeschlossen, fehlende Positionen freigegeben von ${p.freigabe.von} am ${dt(p.freigabe.ts)}` : 'vollständig gepickt'],
       ['Exportiert', `${dt(Date.now())} von ${picker}`],
       [],
-      ['Pos.', 'Artikelnummer', 'Bezeichnung', 'Charge', 'Menge soll', 'Menge gepickt', 'Differenz', 'Einheit', 'Gebindegröße',
-        'Gebinde gescannt', 'davon per Sammelbuchung bestätigt', 'Gebinde von Hand', 'Status', 'Hinweis'],
+      ['Pos.', 'BA-Nr.', 'Kunde', 'Artikelnummer', 'Bezeichnung', 'Charge', 'Menge soll', 'Menge gepickt', 'Differenz', 'Einheit', 'Gebindegröße',
+        'Gebinde gescannt', 'davon per Sammelbuchung bestätigt', 'Gebinde von Hand', 'Status', 'BA-Nr./Kunde geprüft', 'Hinweis'],
       ...p.lines.map((l, i) => {
         const auto = l.scans.filter(x => !x.manuell);
-        return [i + 1, l.artikel, l.bez || '', l.charge || '', l.required, r3(l.picked), r3(l.picked - l.required), l.einheit, l.gebinde ?? '',
+        return [i + 1, l.ba || '', l.kunde || '', l.artikel, l.bez || '', l.charge || '', l.required, r3(l.picked), r3(l.picked - l.required), l.einheit, l.gebinde ?? '',
           auto.reduce((s, x) => s + (x.anzahl || 1), 0), auto.reduce((s, x) => s + (x.anzahl || 1) - 1, 0), l.scans.filter(x => x.manuell).reduce((s, x) => s + (x.anzahl || 1), 0),
-          status(l), l.hinweis || ''];
+          status(l), l.baOk ? `${l.baOk.von || '–'}, ${dt(l.baOk.ts)}` : 'nicht geprüft', l.hinweis || ''];
       }),
     ];
     const art = x => (x.manuell ? 'von Hand' : x.anzahl > 1 ? `Sammelbuchung: 1 gescannt, ${x.anzahl - 1} vom Picker bestätigt` : 'Scan');
-    const buchungen = [['Pos.', 'Artikelnummer', 'Charge soll', 'Charge gescannt', 'Gebinde', 'Menge je Gebinde', 'Menge gesamt', 'Einheit',
+    const buchungen = [['Pos.', 'BA-Nr.', 'Artikelnummer', 'Charge soll', 'Charge gescannt', 'Gebinde', 'Menge je Gebinde', 'Menge gesamt', 'Einheit',
       'Picker', 'Zeitpunkt', 'Buchung'],
       ...p.lines.flatMap((l, i) => l.scans.map(x => ({ l, i, x }))).sort((a, b) => a.x.ts - b.x.ts)
-        .map(({ l, i, x }) => [i + 1, l.artikel, l.charge || '', x.charge || '', x.anzahl || 1, x.menge, r3(x.menge * (x.anzahl || 1)), l.einheit,
+        .map(({ l, i, x }) => [i + 1, l.ba || '', l.artikel, l.charge || '', x.charge || '', x.anzahl || 1, x.menge, r3(x.menge * (x.anzahl || 1)), l.einheit,
           x.picker || '', dt(x.ts), art(x)])];
     const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, textSheet(kopf, [16, 18, 30, 16, 11, 13, 10, 8, 13, 15, 18, 15, 24, 20]), 'Pickliste');
-    XLSX.utils.book_append_sheet(wb, textSheet(buchungen, [6, 18, 16, 16, 8, 15, 13, 8, 10, 20, 44]), 'Buchungen');
+    XLSX.utils.book_append_sheet(wb, textSheet(kopf, [16, 12, 20, 18, 30, 16, 11, 13, 10, 8, 13, 15, 18, 15, 24, 22, 20]), 'Pickliste');
+    XLSX.utils.book_append_sheet(wb, textSheet(buchungen, [6, 12, 18, 16, 16, 8, 15, 13, 8, 10, 20, 44]), 'Buchungen');
     // Dateiname nur ASCII: Umlaute machen Ärger in Windows-Freigaben, Mail-Anhängen und beim Download selbst
     const slug = t => t.replace(/->|→/g, ' ').replace(/[äöüÄÖÜß]/g, c => ({ ä: 'ae', ö: 'oe', ü: 'ue', Ä: 'Ae', Ö: 'Oe', Ü: 'Ue', ß: 'ss' })[c])
       .normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^A-Za-z0-9-]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 60);

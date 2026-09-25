@@ -115,6 +115,8 @@ function classifyLabelColor(pixels) {
 
 /* ---------- Pickliste ---------- */
 const normH = h => String(h ?? '').toLowerCase().replace(/[^a-zäöüß0-9]/g, '');
+// Spalte "BA-Nr." (Betriebsauftrag) mit "Kunde" in der zweiten Kopfzeile; "8A-Nr." = gängiger Lesefehler im Foto
+const BA_HEAD = /^([b8]anr|[b8]anummer|kunde)/;
 const pickErr = m => Object.assign(new Error(m), { userMessage: true }); // erwartbarer Fehler: nur Toast, kein Konsolenfehler
 const normArt = s => String(s ?? '').toUpperCase().replace(/\s+/g, '');
 const normCharge = s => normArt(s).replace(/^0+(?=.)/, ''); // "0001446028" == "1446028"
@@ -164,6 +166,10 @@ function parsePicklist(raw, fmt = raw) {
   const colCharge = col(['charge', 'lot']), colMenge = col(['menge']), colEinheit = col(['einheit']);
   const colAnzahl = col(['anzahl']), colGewicht = col(['gewicht']), colBez = col(['bezeichnung']);
   const colGebinde = col(['gebinde']); // z. B. "Gebindegröße": kg/Stück pro Gebinde, falls in der Vorlage vorhanden
+  // BA-Nr./Kunde: meist eine Spalte mit BA-Nr. in der Artikelzeile und Kunde darunter; gibt es "Kunde" als eigene
+  // Spalte, steht er in der Artikelzeile. Fehlt die Spalte, bleibt beides leer -- der Picker prüft und ergänzt es.
+  const colBA = col(['banr', '8anr', 'banummer']), colKundeEigene = col(['kunde']);
+  const colKunde = colKundeEigene >= 0 && colKundeEigene !== colBA ? colKundeEigene : -1;
   if (colMenge < 0 && colAnzahl < 0 && colGewicht < 0) throw pickErr('Spalte "Menge", "Anzahl" oder "Gewicht" nicht gefunden.');
 
   const text = (i, j) => {
@@ -183,17 +189,21 @@ function parsePicklist(raw, fmt = raw) {
     return null;
   };
   const isArticle = isArticleNo;
-  const isHeader = s => /^(bezeichnung|artikel|charge|lot|menge|best|einheit|anzahl|gewicht|produktion|logistik)/.test(normH(s));
+  const isHeader = s => /^(bezeichnung|artikel|charge|lot|menge|best|einheit|anzahl|gewicht|produktion|logistik)/.test(normH(s)) || BA_HEAD.test(normH(s));
 
   const lines = [];
-  let cur = null;
+  let cur = null, curRow = -1;
+  const baText = (i, j) => { const t = text(i, j); return t && !isHeader(t) ? t : ''; };
   for (let i = h + 1; i < raw.length; i++) {
     const a = text(i, colArt);
     if (isArticle(a)) {
       cur = { artikel: a, bez: colBez >= 0 && colBez !== colArt ? text(i, colBez) : '', charge: text(i, colCharge), hinweis: '',
-        ...(qty(i) || { required: 0, einheit: 'Stück' }), picked: 0, scans: [] };
-      lines.push(cur);
-    } else if (cur && a && !isHeader(a) && !cur.bez) {
+        ba: baText(i, colBA), kunde: baText(i, colKunde), ...(qty(i) || { required: 0, einheit: 'Stück' }), picked: 0, scans: [] };
+      lines.push(cur); curRow = i;
+      continue;
+    }
+    if (cur && i === curRow + 1 && colKunde < 0 && !cur.kunde) cur.kunde = baText(i, colBA); // zweite Zeile: Kunde
+    if (cur && a && !isHeader(a) && !cur.bez) {
       cur.bez = a; // zweite Zeile eines Artikels: Bezeichnung, daneben evtl. Hinweis
       const note = text(i, colCharge);
       if (note && !isHeader(note)) cur.hinweis = note;
@@ -343,7 +353,7 @@ function picklistGridFromWords(ocrLines, width) {
     // die Chargen in die Artikelspalte).
     const sure = w => w.confidence >= 40 || /^([A-Za-z]?\d+([.,]\d+)?[A-Za-z]?|\d+([.,]\d+)?kg|kg|->|→)$/i.test(w.text.trim()) ||
       /^(?=(\D*\d){2})[A-Z0-9][A-Z0-9\-./]{3,39}$/i.test(w.text.trim()) ||
-      /^(artikel|bezeichnung|charge|lot|menge|best|anzahl|gewicht|einheit|gebinde)/.test(normH(w.text));
+      /^(artikel|bezeichnung|charge|lot|menge|best|anzahl|gewicht|einheit|gebinde)/.test(normH(w.text)) || BA_HEAD.test(normH(w.text));
     const ws = (l.words || []).map(w => ({ ...w, text: tidy(w.text) }))
       .filter(w => sure(w) && w.text && !/^[|¦![\]()—–_=~.,:;'"`]+$/.test(w.text))
       .map(w => ({ text: w.text, x0: w.bbox.x0, x1: w.bbox.x1, h: w.bbox.y1 != null ? w.bbox.y1 - w.bbox.y0 : 0,
@@ -363,8 +373,8 @@ function picklistGridFromWords(ocrLines, width) {
   // Zellrand/Tabellenstrich vor dem ersten Zeichen ("[10006349PFL", "|91100023") gehört nicht zur Nummer
   const firstTok = s => s.replace(/^[^\p{L}\p{N}]+/u, '').split(/\s+/)[0];
   const isArt = f => isArticleNo(firstTok(f.text));
-  const anyHead = f => /^(artikel|bezeichnung|charge|lot|menge|best|einheit|anzahl|gewicht|gebinde|produktion|logistik)/.test(normH(f.text));
-  const colHead = f => /^(charge|lot|menge|einheit|anzahl|gewicht|bezeichnung|gebinde)/.test(normH(f.text));
+  const anyHead = f => /^(artikel|bezeichnung|charge|lot|menge|best|einheit|anzahl|gewicht|gebinde|produktion|logistik)/.test(normH(f.text)) || BA_HEAD.test(normH(f.text));
+  const colHead = f => /^(charge|lot|menge|einheit|anzahl|gewicht|bezeichnung|gebinde)/.test(normH(f.text)) || BA_HEAD.test(normH(f.text));
   // "Artikel…"-Überschrift, tolerant gegen Lesefehler: im echten Foto kam "rtikelnummer" (A am Tabellenstrich
   // abgeschnitten), im schrägen Foto "[Artikeinummer" (l als i gelesen)
   const artHead = frags.find(f => /rt[il1]k[ec3][il1]|tikel|artnr/.test(normH(f.text)));
@@ -473,7 +483,9 @@ function picklistGridFromWords(ocrLines, width) {
         if (main[k]) add(second, k, f.text); else main[k] = f.text;
       }
     }
-    cols.push({ name: head ? head.text : '', main, second, qtyLike: vals.filter(f => /^\d+([.,]\d+)?\s*(kg|stk|stück)?\.?$/i.test(f.text)).length });
+    // "BA-Nr." oder "Kunde" (zweizeiliger Kopf derselben Spalte): immer unter einem Namen, BA-Nr. oben, Kunde darunter
+    const name = head ? (BA_HEAD.test(normH(head.text)) ? 'BA-Nr.' : head.text) : '';
+    cols.push({ name, main, second, qtyLike: vals.filter(f => /^\d+([.,]\d+)?\s*(kg|stk|stück)?\.?$/i.test(f.text)).length });
   }
   // Überschrift "Menge" nicht gelesen? Dann ist es die Spalte, die fast nur aus Mengen besteht. Nur wenn es die
   // Überschrift wirklich nicht gibt -- eine gelesene, aber leere Spalte bleibt leer.
