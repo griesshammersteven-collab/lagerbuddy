@@ -2,7 +2,7 @@
 /* LagerBuddy: Etikett fotografieren -> Barcodes + Text lokal auf dem Handy lesen -> Liste -> Excel.
    Alle Bibliotheken liegen in vendor/, kein Foto verlässt das Gerät. Nur Picklisten (Positionen, Zuteilung,
    Buchungen) werden über Supabase zwischen den Handys abgeglichen, wenn SYNC unten eingerichtet ist. */
-const APP_VERSION = '2026-09-25.6'; // bei JEDER Veröffentlichung erhöhen, genauso wie ?v= in index.html
+const APP_VERSION = '2026-09-25.7'; // bei JEDER Veröffentlichung erhöhen, genauso wie ?v= in index.html
 // Alte index.html (CDN/Offline-Speicher) mit neuerem app.js-Inhalt: dann fehlen Knöpfe und der Start bricht ab.
 // Einmal frisch laden (eindeutige URL geht am CDN vorbei), bevor irgendetwas verdrahtet wird.
 {
@@ -116,11 +116,16 @@ let toastT;
 // Gleicher Text wie eben: erst leeren, dann setzen, sonst sagen Screenreader ihn kein zweites Mal an.
 function toast(msg) {
   const t = $('toast');
+  // Formular offen: Hinweis zusätzlich über dem Buchen-Knopf stehen lassen (role=alert), bis weiter getippt wird
+  const imForm = !$('form').hidden;
+  if (imForm) { $('formFehler').textContent = msg; $('formFehler').hidden = false; }
+  t.setAttribute('aria-hidden', String(imForm)); // sonst doppelt vorgelesen
   if (t.textContent === msg) { t.textContent = ''; requestAnimationFrame(() => { t.textContent = msg; }); } else t.textContent = msg;
   t.classList.add('on');
   clearTimeout(toastT); toastT = setTimeout(() => t.classList.remove('on'), Math.min(12000, Math.max(4000, msg.length * 70)));
 }
-$('toast').onclick = () => { clearTimeout(toastT); $('toast').classList.remove('on'); };
+// Jeder Tipp schließt den Hinweis und geht trotzdem durch (der Toast liegt sonst über „Gebinde buchen“)
+document.addEventListener('pointerdown', () => { clearTimeout(toastT); $('toast').classList.remove('on'); }, true);
 // Weich scrollen nur, wenn das System keine reduzierte Bewegung wünscht
 const glatt = () => (matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth');
 // Hintergrund für Tastatur und Screenreader sperren, solange Anmeldung oder Rundgang offen sind
@@ -523,7 +528,7 @@ function baBlock(l, i, istDran) {
     if (!l.baOk) {
       const ok = document.createElement('button');
       ok.type = 'button'; ok.className = 'btn pick-ba-ok'; ok.textContent = '✓ Geprüft';
-      ok.onclick = () => { baGeprueft(l); renderPick(); };
+      ok.onclick = () => { baGeprueft(l); renderPick(); $('cam').focus({ preventScroll: true }); };
       box.append(ok);
     }
   } else {
@@ -950,20 +955,22 @@ function showForm(r, file, idx = null) {
   if (file) $('preview').src = previewUrl; else $('preview').removeAttribute('src');
   $('form').hidden = false; $('scan').hidden = true; $('bar').hidden = true; $('modeSwitch').hidden = true;
   renderAnzahl();
-  formGeaendert = false;
+  formGeaendert = false; $('formFehler').hidden = true;
   for (const el of $('form').querySelectorAll('[aria-invalid]')) el.removeAttribute('aria-invalid');
   $('form').scrollIntoView({ behavior: glatt(), block: 'start' });
   $('form').focus({ preventScroll: true });
 }
 // Von Hand getippt? Dann vor dem Verwerfen einmal nachfragen (ein bloß fotografiertes Etikett verwirft man ohne Rückfrage)
 let formGeaendert = false;
-$('form').addEventListener('input', ev => { formGeaendert = true; ev.target.removeAttribute?.('aria-invalid'); });
+$('form').addEventListener('input', ev => { formGeaendert = true; $('formFehler').hidden = true; ev.target.removeAttribute?.('aria-invalid'); });
+$('form').addEventListener('change', () => { $('formFehler').hidden = true; });
 function closeForm() {
   $('form').hidden = true; $('scan').hidden = false; $('bar').hidden = false; $('modeSwitch').hidden = !modiSichtbar();
   editIdx = null;
   if (previewUrl) { URL.revokeObjectURL(previewUrl); previewUrl = null; }
   $('preview').removeAttribute('src');
   if (mode === 'pick') renderPick(); // ohne geöffnete Pickliste bleibt der Etikett-Leser versteckt
+  (!$('scan').hidden ? $('cam') : $('pickBanner')).focus({ preventScroll: true });
 }
 
 $('form').onsubmit = ev => {
@@ -974,7 +981,7 @@ $('form').onsubmit = ev => {
   const menge = parseDe($('menge').value); // deutsches Format ("12,5", "1.000"), type=number kennt nur den Punkt
   if (!(menge > 0)) { toast('Bitte die Menge pro Gebinde eintragen.'); $('menge').focus(); return; }
   const einheit = document.querySelector('input[name=einheit]:checked')?.value;
-  if (!einheit) { toast('Bitte Stück oder kg auswählen.'); return; }
+  if (!einheit) { toast('Bitte Stück oder kg auswählen.'); document.querySelector('input[name=einheit]').focus(); return; }
   e.menge = menge; e.einheit = einheit;
   e.lagerplatz = $('lagerplatz').value.trim();
   if (picker) e.picker = picker;
@@ -1413,7 +1420,7 @@ function login(code, r, info) {
   if (!$('form').hidden) closeForm(); // halb erfasstes Etikett gehört dem vorherigen Nutzer
   openId = null; pick = null;
   if (mode === 'team') setMode('scan'); // Verwaltung nie für den nächsten offen lassen
-  renderPicker(); applyRoleUI();
+  renderPicker(); applyRoleUI(); setMode(mode); // setzt auch den Seitentitel
   const gelandet = landen();
   (document.querySelector('#modeSwitch:not([hidden]) .mode-btn.active') || $('pickerBtn')).focus({ preventScroll: true });
   // frisch vom Server holen; war lokal noch nichts da, danach nochmal schauen
@@ -1442,8 +1449,12 @@ function closeTlForm() {
   $('tlPw').value = $('pwNeu').value = $('pwNeu2').value = '';
   for (const b of $('gateMasters').children) b.classList.remove('active');
 }
-function tlFehler(msg) { $('tlErr').textContent = msg; $('tlErr').hidden = false; $('tlPw').select(); }
-$('tlCancel').onclick = $('pwCancel').onclick = closeTlForm;
+function tlFehler(msg) { $('tlErr').textContent = msg; $('tlErr').hidden = false; $('tlPw').setAttribute('aria-invalid', 'true'); $('tlPw').select(); }
+$('tlPw').addEventListener('input', () => $('tlPw').removeAttribute('aria-invalid'));
+$('tlCancel').onclick = $('pwCancel').onclick = () => {
+  const k = tlCode; closeTlForm();
+  (document.querySelector(`#gateMasters button[data-k="${k}"]`) || $('gateTitel')).focus();
+};
 // Anmelden mit Rolle und Bereichen; lb_anmelden fehlt nur, solange die Datenbank noch den alten Stand hat
 async function anmelden(code, pw) {
   try { return await rpc('lb_anmelden', { lager, kuerzel: code, pw }); }

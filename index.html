@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'sha256-34rmKNmsXbxL3i59idQO0KPSTIzAYB3ZkDajGAVW9lU='; img-src 'self' blob:; connect-src 'self' blob: data: https://*.supabase.co; worker-src 'self' blob:; manifest-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'sha256-PhGRe8GYv2gxrqCfjuJSKnlzDTJmE/Mpm9iRDJSoJJE='; img-src 'self' blob:; connect-src 'self' blob: data: https://*.supabase.co; worker-src 'self' blob:; manifest-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'">
 <meta name="referrer" content="no-referrer">
 <meta name="theme-color" content="#0B4F82">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -228,7 +228,7 @@ header{gap:8px;flex-wrap:wrap}
 #scan{margin-bottom:16px}
 /* Auswahl-Kacheln im Formular (Ein/Aus, Scannen) sahen aus wie leere Felder */
 .f label.btn{display:flex;justify-content:center;align-items:center;margin:0;font-size:var(--fs-m);color:var(--text)}
-.unit label:has(input:checked)::before{content:"✓";font-weight:700}
+.unit label:has(input:checked)::before{content:"✓" / "";font-weight:700}
 .f>label,.tm-label{flex-wrap:wrap;gap:2px 8px}
 .tm-rollen,.tm-bereiche{grid-template-columns:repeat(auto-fit,minmax(96px,1fr))}
 .nums{word-break:normal;overflow-wrap:anywhere}
@@ -253,13 +253,19 @@ h2,.gate-lead{font-size:var(--fs-s);letter-spacing:.08em}
 #tourNext{min-width:0;flex:1 1 auto}
 /* Toast: invertiert, antippen schließt */
 #toast{background:var(--text);color:var(--bg);border:0;font-weight:600;box-shadow:0 8px 24px #000a}
-#toast.on{pointer-events:auto;cursor:pointer}
 .bar{grid-template-columns:minmax(0,2fr) minmax(0,1fr)}
 .bar .danger{width:100%}
 body{overflow-wrap:break-word}
 .btn{overflow-wrap:anywhere;hyphens:auto}
 [tabindex="-1"]:focus{outline:none} /* reine Fokusziele (Überschrift, Formular): kein Ring */
 @media (prefers-reduced-motion:reduce){*{transition:none!important}.btn:active{transform:none}.spin{animation-duration:3s}}
+/* Runde 2: keine Worttrennung in Knöpfen bei 320/390 px */
+.bar:has(#pickBar:not([hidden])){grid-template-columns:repeat(2,minmax(0,1fr))}
+@media (max-width:360px){#modeSwitch{gap:6px}#modeSwitch .mode-btn{font-size:14px;padding:0 4px}.bar .btn svg{display:none}}
+.tm-rollen,.tm-bereiche{display:flex;flex-wrap:wrap;gap:8px}
+.tm-rollen .btn,.tm-bereiche .btn{flex:1 1 auto;width:auto;padding:0 10px;position:relative}
+.tm-rollen label:has(input:checked)::before,.tm-bereiche label:has(input:checked)::before{position:absolute;top:4px;left:7px;font-size:13px;line-height:1}
+.pick-line.done .pick-ba-ok{border-color:var(--field)}
 </style>
 </head>
 <body>
@@ -375,6 +381,7 @@ body{overflow-wrap:break-word}
         <label class="btn"><input class="file" type="radio" name="richtung" value="ein"> Einbuchen</label>
       </div>
     </div>
+    <p class="label-check info" id="formFehler" role="alert" hidden></p>
     <button class="btn primary" type="submit" id="formSubmit">Zur Liste hinzufügen</button>
     <button class="btn" type="button" id="cancel">Verwerfen</button>
   </form>
@@ -450,7 +457,7 @@ body{overflow-wrap:break-word}
       </div>
     </div>
     <form class="card tm-form" id="tmForm" hidden autocomplete="off">
-      <b id="tmTitel">Person anlegen</b>
+      <b id="tmTitel" tabindex="-1">Person anlegen</b>
       <div class="f"><label for="tmKuerzel">Kürzel <span class="sub">2 bis 8 Zeichen, zum Anmelden</span></label><input id="tmKuerzel" maxlength="8" autocapitalize="off" spellcheck="false"></div>
       <div class="f"><label for="tmName">Name <span class="sub">optional</span></label><input id="tmName" maxlength="60"></div>
       <div><p class="tm-label" id="tmRolleLbl">Rolle</p>
@@ -508,11 +515,11 @@ body{overflow-wrap:break-word}
 </div>
 <div id="toast" role="status" aria-live="polite"></div>
 
-<script src="parse.js?v=2026-09-25.6"></script>
-<script src="picks.js?v=2026-09-25.6"></script>
-<script src="app.js?v=2026-09-25.6"></script>
-<script src="lager.js?v=2026-09-25.6"></script>
-<script src="team.js?v=2026-09-25.6"></script>
-<script src="tour.js?v=2026-09-25.6"></script>
+<script src="parse.js?v=2026-09-25.7"></script>
+<script src="picks.js?v=2026-09-25.7"></script>
+<script src="app.js?v=2026-09-25.7"></script>
+<script src="lager.js?v=2026-09-25.7"></script>
+<script src="team.js?v=2026-09-25.7"></script>
+<script src="tour.js?v=2026-09-25.7"></script>
 </body>
 </html>

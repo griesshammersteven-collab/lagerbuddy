@@ -120,6 +120,8 @@ function tourZeigen() {
   $('tourPrev').hidden = tour.i === 0;
   $('tourNext').textContent = tour.i === n - 1 ? 'Fertig' : 'Weiter';
   $('tourSkip').hidden = tour.i === n - 1;
+  const f = document.activeElement; // „Zurück“ auf Schritt 2 verschwindet gerade: Fokus fällt sonst auf body
+  if (!f || f === document.body || f.hidden) $('tourNext').focus();
   tourPlatzieren(); // Karte zuerst setzen: ihre Höhe bestimmt, wie viel Platz das Ziel hat
   const el = tourZiel();
   if (el) { // Ziel in den freien Bereich über der Karte schieben (zentriert, zu hohe Ziele oben bündig)

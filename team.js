@@ -56,11 +56,12 @@ function tmOeffnen(p) {
   tmRolleHinweis();
   renderTeam();
   $('tmForm').scrollIntoView({ behavior: glatt(), block: 'start' });
-  if (neu) setTimeout(() => $('tmKuerzel').focus(), 50);
+  if (neu) setTimeout(() => $('tmKuerzel').focus(), 50); else $('tmTitel').focus({ preventScroll: true });
 }
-function tmSchliessen() { tmEdit = null; renderTeam(); }
+function tmSchliessen() { tmEdit = null; renderTeam(); $('tmNeu').focus({ preventScroll: true }); }
 function tmRolleHinweis() { $('tmRolleHint').textContent = ROLLEN_HINWEIS[tmRolle()] || ''; }
-function tmFehler(msg) { $('tmErr').textContent = msg; $('tmErr').hidden = false; }
+function tmFehler(msg) { $('tmErr').textContent = msg; $('tmErr').hidden = false; if (/Kürzel/.test(msg)) { $('tmKuerzel').setAttribute('aria-invalid', 'true'); $('tmKuerzel').focus(); } }
+$('tmKuerzel').addEventListener('input', () => $('tmKuerzel').removeAttribute('aria-invalid'));
 
 function zeigePasswort(kuerzel, pw, hinweis) {
   $('tmPwTitel').textContent = `Passwort für ${kuerzel}`;
@@ -131,12 +132,12 @@ $('teamBtn').onclick = () => {
   window.scrollTo({ top: 0 });
 };
 $('tmNeu').onclick = () => tmOeffnen(null);
-$('tmZurueck').onclick = () => { if (mode === 'team') $('teamBtn').click(); };
+$('tmZurueck').onclick = () => { if (mode === 'team') $('teamBtn').click(); document.querySelector('.mode-btn.active')?.focus(); };
 $('tmCancel').onclick = tmSchliessen;
 $('tmForm').onsubmit = tmSpeichern;
 $('tmReset').onclick = tmZuruecksetzen;
 for (const r of document.querySelectorAll('input[name=tmRolle]')) r.onchange = tmRolleHinweis;
-$('tmPwOk').onclick = () => { $('tmPwBox').hidden = true; $('tmPwCode').textContent = ''; renderTeam(); };
+$('tmPwOk').onclick = () => { $('tmPwBox').hidden = true; $('tmPwCode').textContent = ''; renderTeam(); $('tmNeu').focus({ preventScroll: true }); };
 $('tmPwCopy').onclick = async () => {
   try { await navigator.clipboard.writeText($('tmPwCode').textContent); toast('Passwort kopiert.'); }
   catch { toast('Kopieren ging nicht. Bitte abschreiben.'); }
