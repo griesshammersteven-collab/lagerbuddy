@@ -113,7 +113,9 @@ function renderLager() {
     const h = document.createElement('div'); h.className = 'lp-head'; h.textContent = lp;
     li.append(h);
     for (const e of items) {
-      const it = document.createElement('div'); it.className = 'lp-item' + (e.menge < 0 ? ' neg' : '');
+      const it = document.createElement('button'); it.type = 'button'; it.className = 'lp-btn' + (e.menge < 0 ? ' neg' : '');
+      it.setAttribute('aria-label', `${e.lagerplatz}: ${e.artikel}${e.charge ? ', Charge ' + e.charge : ''}, ${fmtN(e.menge)} ${e.einheit}. Entnehmen, umlagern oder ausbuchen`);
+      it.dataset.k = bKey(e); it.onclick = () => dtOeffnen(e);
       const links = document.createElement('div');
       const n = document.createElement('div'); n.className = 'nums'; n.textContent = e.artikel + (e.bez ? ' · ' + e.bez : '');
       const s = document.createElement('div'); s.className = 'sub'; s.textContent = e.charge ? 'Charge ' + e.charge : 'ohne Charge';
@@ -132,8 +134,212 @@ function renderLager() {
   $('bestandLeer').hidden = !!rows.length;
   $('bestandLeer').textContent = q && alle.length ? 'Nichts gefunden.' : 'Noch nichts eingebucht.';
   $('bestandExport').hidden = role !== 'master';
+  dtAktualisieren();
 }
 $('bestandSuche').addEventListener('input', () => renderLager());
+
+/* ---------- Bestand antippen: für eine Pickliste entnehmen, umlagern oder ausbuchen ----------
+   Der Picker steht am Regal und bedient von dort offene Picklisten. Aus dem Bestand heraus gilt die Reihenfolge der
+   Pickliste nicht (sie ist eine Laufweg-Empfehlung, keine Prüfung). Geprüft wird trotzdem: Ein Gebinde wird gescannt,
+   Artikel-Barcode und Charge müssen zu dieser Bestandszeile passen. Weitere gleiche Gebinde bestätigt man mit der
+   Anzahl (wie die Sammelbuchung, gebucht auf das eigene Kürzel). Mehr als laut Bestand: Hinweis, kein Verbot. */
+let dt = null; // { k: Schlüssel der Bestandszeile, e: Bestandszeile, von: Kürzel }
+const dtAktion = () => document.querySelector('input[name=dtAktion]:checked')?.value || '';
+const dtPos = () => document.querySelector('input[name=dtPos]:checked')?.value || '';
+const proGebinde = e => (e.gebinde > 0 && e.menge > 0 ? rund3(e.menge / e.gebinde) : 0);
+// Offene Positionen sichtbarer Picklisten mit diesem Artikel (und dieser Charge, wenn die Position eine vorgibt)
+function passendePositionen(e) {
+  if (role !== 'master' && !erlaubt('pick')) return [];
+  return picks.filter(p => sichtbar(p) && !p.freigabe && !tourDemo.some(t => t.id === p.id))
+    .flatMap(p => p.lines.map((l, i) => ({ p, l, i })))
+    .filter(({ l }) => l.picked < l.required - 0.0005 && normArt(l.artikel) === e.artikel && l.einheit === e.einheit
+      && (!l.charge || normCharge(l.charge) === normCharge(e.charge)));
+}
+function dtFehler(msg) { $('dtFehler').textContent = msg; $('dtFehler').hidden = !msg; }
+function dtOeffnen(e) {
+  if (busy || !$('form').hidden) { toast('Bitte zuerst das offene Etikett fertig buchen oder verwerfen.'); return; }
+  dt = { k: bKey(e), e, von: picker };
+  for (const r of document.getElementsByName('dtAktion')) r.checked = false;
+  $('dtZiel').value = ''; dtFehler('');
+  $('dtPlatz').textContent = e.lagerplatz;
+  $('dtTitel').textContent = e.artikel + (e.bez ? ' · ' + e.bez : '');
+  const pos = passendePositionen(e);
+  $('dtPickOpt').hidden = !pos.length; $('dtKeinePick').hidden = !!pos.length;
+  if (pos.length) document.querySelector('input[name=dtAktion][value=pick]').checked = true; // der häufigste Fall
+  $('dtPicks').replaceChildren(...pos.map(({ p, l, i }, j) => {
+    const lab = document.createElement('label'); lab.className = 'btn';
+    const r = document.createElement('input'); r.className = 'file'; r.type = 'radio'; r.name = 'dtPos'; r.value = `${p.id}|${l.lid}`; r.checked = j === 0;
+    const fehlt = rund3(l.required - l.picked);
+    lab.append(r, `${p.name} · Pos. ${i + 1}${p.fuer ? ' · für ' + p.fuer : ''} · fehlt ${fmtN(fehlt)} ${l.einheit}`);
+    return lab;
+  }));
+  dtInfo(); dtModus();
+  $('lpDetail').hidden = false;
+  $('lpDetail').scrollIntoView({ behavior: glatt(), block: 'start' });
+  $('dtTitel').focus({ preventScroll: true });
+}
+function dtSchliessen() {
+  if (!dt) return;
+  const k = dt.k; dt = null;
+  $('lpDetail').hidden = true;
+  [...document.querySelectorAll('#bestandList .lp-btn')].find(b => b.dataset.k === k)?.focus({ preventScroll: true });
+}
+function dtInfo() {
+  const e = dt.e, g = proGebinde(e);
+  $('dtInfo').textContent = `${e.charge ? 'Charge ' + e.charge : 'ohne Charge'} · Bestand ${fmtN(e.menge)} ${e.einheit}, ${fmtN(e.gebinde)} Gebinde${g ? ` (je ${fmtN(g)} ${e.einheit})` : ''}`;
+  const auch = bestand().filter(x => x.lagerplatz !== e.lagerplatz && x.artikel === e.artikel && x.einheit === e.einheit
+    && normCharge(x.charge) === normCharge(e.charge) && x.menge > 0);
+  $('dtAuch').hidden = !auch.length;
+  $('dtAuch').textContent = auch.length ? 'Dieselbe Charge liegt auch an: ' + auch.map(x => `${x.lagerplatz} (${fmtN(x.menge)} ${x.einheit})`).join(', ') : '';
+}
+// Bestand hat sich geändert (Abgleich, eigene Buchung): Zahlen nachziehen, bei Kürzel-Wechsel schließen
+function dtAktualisieren() {
+  if (!dt) return;
+  if (dt.von !== picker || mode !== 'lager') { dtSchliessen(); return; }
+  const neu = bestand().find(x => bKey(x) === dt.k);
+  if (neu) dt.e = neu;
+  dtInfo(); dtAnzHinweis();
+}
+// Vorbelegte Anzahl: was der Position fehlt (volle Gebinde), höchstens was laut Bestand da liegt
+function dtVorschlag() {
+  const e = dt.e, a = dtAktion();
+  const da = Math.max(1, Math.round(e.gebinde) || 1);
+  if (a !== 'pick') return da;
+  const z = dtZeile(); if (!z) return 1;
+  const g = z.l.gebinde || proGebinde(e);
+  const fehltG = g ? Math.floor((z.l.required - z.l.picked + 0.001) / g) : 1;
+  return Math.max(1, Math.min(fehltG || 1, da));
+}
+function dtZeile() {
+  const [pid, lid] = dtPos().split('|');
+  const p = picks.find(x => x.id === pid), l = p?.lines.find(x => x.lid === lid);
+  return p && l ? { p, l, i: p.lines.indexOf(l) } : null;
+}
+function dtModus() {
+  const a = dtAktion();
+  $('dtPickRow').hidden = a !== 'pick';
+  $('dtZielRow').hidden = a !== 'umlagern';
+  $('dtAnzRow').hidden = !a;
+  $('dtScanText').textContent = { pick: 'Gebinde scannen und entnehmen', umlagern: 'Gebinde scannen und umlagern', aus: 'Gebinde scannen und ausbuchen' }[a] || 'Gebinde scannen und buchen';
+  $('dtAnz').value = String(dtVorschlag());
+  dtFehler(''); dtAnzHinweis();
+}
+const dtAnzahl = () => { const n = parseInt($('dtAnz').value, 10); return n > 0 ? n : 1; };
+function dtAnzHinweis() {
+  if (!dt) return;
+  const n = dtAnzahl(), da = Math.round(dt.e.gebinde);
+  $('dtAnzHint').textContent = n > da ? `Laut Bestand liegen hier nur ${fmtN(Math.max(0, da))} Gebinde. Gebucht wird trotzdem.` : `Laut Bestand: ${fmtN(da)} Gebinde.`;
+  $('dtAnzHint').className = 'pick-hint' + (n > da ? ' pick-note' : '');
+}
+for (const r of document.getElementsByName('dtAktion')) r.onchange = dtModus;
+$('dtPicks').addEventListener('change', () => { $('dtAnz').value = String(dtVorschlag()); dtAnzHinweis(); });
+$('dtMinus').onclick = () => { $('dtAnz').value = String(Math.max(1, dtAnzahl() - 1)); dtAnzHinweis(); };
+$('dtPlus').onclick = () => { $('dtAnz').value = String(dtAnzahl() + 1); dtAnzHinweis(); };
+$('dtAnz').addEventListener('input', dtAnzHinweis);
+$('dtZu').onclick = dtSchliessen;
+$('dtZiel').addEventListener('input', () => dtFehler(''));
+// Vor dem Öffnen der Kamera prüfen, ob alles gewählt ist (danach ist der Picker schon beim Fotografieren)
+$('dtScanBtn').addEventListener('click', ev => {
+  if (ev.target === $('dtCam')) return;
+  const a = dtAktion();
+  let fehler = '';
+  if (!a) fehler = 'Bitte zuerst wählen: entnehmen, umlagern oder ausbuchen.';
+  else if (a === 'pick' && !dtZeile()) fehler = 'Bitte die Position wählen.';
+  else if (a === 'umlagern') {
+    const [z] = findLagerplatz($('dtZiel').value);
+    if (!z) fehler = 'Bitte den Ziel-Lagerplatz scannen oder eintippen (z. B. H3.01.01.00.01).';
+    else if (z === dt.e.lagerplatz) fehler = 'Ziel und Herkunft sind derselbe Lagerplatz.';
+  }
+  if (fehler) { ev.preventDefault(); dtFehler(fehler); }
+});
+$('dtZielCam').onchange = async ev => {
+  const f = ev.target.files[0]; ev.target.value = '';
+  if (!f || busy) return;
+  setBusy(true, 'Lagerplatz wird gelesen …');
+  let canvas;
+  try {
+    canvas = await toCanvas(f, 2000);
+    const r = await leseLagerplatz(canvas);
+    if (r) { $('dtZiel').value = r.lp; dtFehler(''); } else toast('Kein Lagerplatz erkannt. Näher herangehen und neu scannen oder die Nummer eintippen.');
+  } catch (err) { console.error(err); toast('Foto konnte nicht gelesen werden. Bitte noch einmal versuchen.'); }
+  finally { setBusy(false); if (canvas) { canvas.width = 0; canvas.height = 0; } }
+};
+$('dtCam').onchange = async ev => {
+  const f = ev.target.files[0]; ev.target.value = '';
+  if (!f || busy || !dt) return;
+  if (f.size > 30 * 1024 * 1024) { toast('Foto ist zu groß (über 30 MB). Bitte erneut aufnehmen.'); return; }
+  setBusy(true, 'Barcodes werden gelesen …');
+  let canvas, r = null;
+  try {
+    canvas = await toCanvas(f);
+    let codes = [];
+    try { codes = await readCodes(canvas); } catch (err) { console.warn(err); }
+    let lines = [];
+    try { setBusy(true, 'Text wird gelesen …'); lines = await ocrLines(canvas, codes); } catch (err) { console.warn(err); }
+    r = parseLabel(lines, codes.map(c => c.text));
+  } catch (err) { console.error(err); toast('Das Foto konnte nicht gelesen werden. Bitte noch einmal versuchen.'); }
+  finally { setBusy(false); if (canvas) { canvas.width = 0; canvas.height = 0; } }
+  if (r && dt) dtBuchen(r, `${f.name}|${f.size}|${f.lastModified}`);
+};
+function dtBuchen(r, fp) {
+  const e = dt.e, a = dtAktion(), n = dtAnzahl(), ts = Date.now();
+  // Scan-Pflicht: Artikel per Barcode, Charge passend zur Bestandszeile
+  if (!r.artikelCode) { dtFehler('Barcode nicht erkannt. Etikett noch einmal scharf fotografieren.'); return; }
+  if (normArt(r.artikel) !== e.artikel || (e.charge && normCharge(r.charge) !== normCharge(e.charge))) {
+    dtFehler(`Das gescannte Gebinde passt nicht zu diesem Bestand.\nErwartet: ${e.artikel}${e.charge ? ', Charge ' + e.charge : ''}\nGescannt: ${r.artikel || '?'}${r.charge ? ', Charge ' + r.charge : ''}`);
+    return;
+  }
+  const charge = e.charge || r.charge || '';
+  const g = proGebinde(e) || gemerkt(e.artikel, e.einheit)?.menge || 0;
+  const zuWenig = n > Math.round(e.gebinde) ? `\nHinweis: Laut Bestand liegen an ${e.lagerplatz} nur ${fmtN(Math.max(0, Math.round(e.gebinde)))} Gebinde.` : '';
+  const geprueft = n > 1 ? `alle ${n} Gebinde` : 'das Gebinde';
+  if (a === 'pick') {
+    const z = dtZeile();
+    if (!z || z.p.freigabe || z.l.picked >= z.l.required - 0.0005) { dtFehler('Diese Position ist inzwischen erledigt.'); return; }
+    const { p, l, i } = z;
+    if (picks.some(x => x.lines.some(y => y.scans.some(s => s.fp === fp)))) { dtFehler('Dieses Foto wurde schon gebucht. Bitte ein Gebinde neu fotografieren.'); return; }
+    const geb = l.gebinde || g;
+    if (!geb) { dtFehler('Die Gebindegröße ist unbekannt. Bitte das erste Gebinde in der Pickliste buchen.'); return; }
+    const offen = rund3(l.required - l.picked);
+    let menge = geb;
+    if (n * geb > offen + 0.001) {
+      if (n > 1) { dtFehler(`Offen sind nur noch ${fmtN(offen)} ${l.einheit}: höchstens ${Math.max(1, Math.floor((offen + 0.001) / geb))} Gebinde.`); return; }
+      menge = offen; // letztes Gebinde nur teilweise (Anbruch)
+    }
+    if (!l.baOk) {
+      if (!confirm(`BA-Nr. (Kunde) prüfen\n${p.name} · Position ${i + 1} · ${l.artikel}\nBA-Nr.: ${l.ba || '(leer)'}\n\nStimmt sie mit dem Auftrag überein?\nOK = ja, geprüft (${picker})\nAbbrechen = nicht buchen`)) return;
+      commit(p.id, { t: 'feld', lid: l.lid, key: 'baOk', v: { von: picker, ts } });
+    }
+    if (!confirm(`${n} ${n > 1 ? 'Gebinde' : 'Gebinde'} je ${fmtN(menge)} ${l.einheit} = ${fmtN(rund3(n * menge))} ${l.einheit} aus ${e.lagerplatz} entnehmen?\n` +
+      `Für: ${p.name}, Position ${i + 1}${menge < geb - 0.001 ? ' (Anbruch)' : ''}\n\nGebucht auf ${picker}. Mit OK bestätigen Sie, ${geprueft} geprüft zu haben (Artikel, Charge, Menge).${zuWenig}`)) return;
+    const scan = { ts, menge, charge, picker, ...(n > 1 ? { anzahl: n } : {}), fp, lagerplatz: e.lagerplatz, richtung: 'aus', ausBestand: true };
+    if (!commit(p.id, { t: 'scan', lid: l.lid, scan })) return;
+    if (!l.gebinde && menge === geb) commit(p.id, { t: 'feld', lid: l.lid, key: 'gebinde', v: geb });
+    const hinweis = lagerBewegung({ ts, lagerplatz: e.lagerplatz, richtung: 'aus', quelle: 'pickliste', pick_id: p.id, artikel: l.artikel,
+      bez: l.bez || e.bez, charge, menge: rund3(n * menge), gebinde: n, einheit: l.einheit, picker });
+    merken(l.artikel, geb, l.einheit);
+    dtSchliessen(); renderLager();
+    toast(`Entnommen: ${n > 1 ? n + ' × ' : ''}${fmtN(menge)} ${l.einheit} ${l.artikel} aus ${e.lagerplatz} für ${p.name}, Position ${i + 1}` + hinweis);
+    return;
+  }
+  if (!g) { dtFehler('Die Menge je Gebinde ist unbekannt. Bitte über „Gebinde ein- oder ausbuchen“ mit Menge buchen.'); return; }
+  const menge = rund3(n * g);
+  if (a === 'umlagern') {
+    const [ziel] = findLagerplatz($('dtZiel').value);
+    if (!ziel || ziel === e.lagerplatz) { dtFehler('Bitte einen anderen Ziel-Lagerplatz wählen.'); return; }
+    if (!confirm(`${n} Gebinde je ${fmtN(g)} ${e.einheit} = ${fmtN(menge)} ${e.einheit} umlagern?\nVon ${e.lagerplatz} nach ${ziel}\n\nGebucht auf ${picker}. Mit OK bestätigen Sie, ${geprueft} geprüft zu haben.${zuWenig}`)) return;
+    const b = { lagerplatz: e.lagerplatz, quelle: 'lager', artikel: e.artikel, bez: e.bez, charge, menge, gebinde: n, einheit: e.einheit, picker };
+    const hinweis = lagerBewegung({ ...b, ts, richtung: 'aus' });
+    lagerBewegung({ ...b, ts: ts + 1, lagerplatz: ziel, richtung: 'ein' });
+    dtSchliessen(); renderLager();
+    toast(`Umgelagert: ${n > 1 ? n + ' × ' : ''}${fmtN(g)} ${e.einheit} ${e.artikel} von ${e.lagerplatz} nach ${ziel}` + hinweis);
+    return;
+  }
+  if (!confirm(`${n} Gebinde je ${fmtN(g)} ${e.einheit} = ${fmtN(menge)} ${e.einheit} aus ${e.lagerplatz} ausbuchen?\n\nGebucht auf ${picker}. Mit OK bestätigen Sie, ${geprueft} geprüft zu haben.${zuWenig}`)) return;
+  const hinweis = lagerBewegung({ ts, lagerplatz: e.lagerplatz, richtung: 'aus', quelle: 'lager', artikel: e.artikel, bez: e.bez, charge, menge, gebinde: n, einheit: e.einheit, picker });
+  dtSchliessen(); renderLager();
+  toast(`Ausgebucht: ${n > 1 ? n + ' × ' : ''}${fmtN(g)} ${e.einheit} ${e.artikel} aus ${e.lagerplatz}` + hinweis);
+}
 
 /* ---------- Formular: Lagerplatz und Ein/Aus ---------- */
 // Vorschlag beim Öffnen: in der Pickliste der Platz der letzten Buchung dieser Position, im Modus Lager der zuletzt benutzte

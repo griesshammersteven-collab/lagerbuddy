@@ -54,6 +54,7 @@ const TOUR_PICKER = [
   { ziel: '#anzahlRow', vor: tourFormular, titel: 'Viele gleiche Gebinde? Einmal scannen', text: 'Ein Gebinde scannen, bei der Anzahl „Alle“ tippen, bestätigen, fertig. Die Sammelbuchung läuft auf Ihr Kürzel: Mit OK bestätigen Sie, alle Gebinde geprüft zu haben.' },
   { ziel: '#lpRow', vor: tourFormular, titel: 'Lagerplatz und Ein/Aus', text: 'Dann den Lagerplatz scannen (Barcode oder die Nummer darunter) und wählen: „Ausbuchen“ beim Holen aus dem Regal, „Einbuchen“ beim Einlagern am Ziel. Der Bestand je Lagerplatz rechnet mit.' },
   { ziel: '.pick-skip-btn', vor: () => tourListe('tour-a'), titel: 'Ware nicht da?', text: 'Position überspringen und mit der nächsten weitermachen. Am Ende gibt der Teamleiter die fehlende Ware frei.' },
+  { ziel: '#modeLager', immer: true, nur: () => erlaubt('lager'), vor: tourUebersicht, titel: 'Direkt aus dem Bestand', text: 'Im Lager eine Bestandszeile antippen: für Ihre Pickliste entnehmen, umlagern oder ausbuchen. Ein Gebinde wird dabei gescannt, weitere bestätigen Sie mit der Anzahl.' },
   { ziel: '#syncState', nur: () => SYNC_ON, vor: () => tourListe('tour-a'), titel: 'Immer abgeglichen', text: 'Jede Buchung geht sofort an den Teamleiter. Kein Internet? Die App sammelt die Buchungen und schickt sie nach.' },
   { ziel: '#tourBtn', immer: true, vor: tourUebersicht, titel: 'Fragen?', text: 'Diesen Rundgang starten Sie jederzeit wieder über das Fragezeichen. Viel Erfolg beim Picken!' },
 ];
@@ -72,7 +73,7 @@ const TOUR_MASTER = [
   { ziel: '#pickExport', vor: () => tourListe('tour-b'), titel: 'Ergebnis als Excel', text: 'Fertige Listen als Excel: Soll und Ist je Position plus jede Buchung mit Picker, Charge und Uhrzeit.' },
   { ziel: '#bar', vor: () => tourListe('tour-b'), titel: 'Ersetzen oder verwerfen', text: 'Liste per Excel neu einlesen oder ganz verwerfen. Das dürfen nur Teamleiter.' },
   { ziel: '#syncState', nur: () => SYNC_ON, vor: () => tourListe('tour-a'), titel: 'Alle Handys abgeglichen', text: 'Alle Handys gleichen sich alle paar Sekunden ab. Kein Internet? Die App schickt Änderungen nach.' },
-  { ziel: '#modeLager', immer: true, nur: () => erlaubt('lager'), vor: tourUebersicht, titel: 'Lager und Bestand', text: 'Hier sehen Sie den Bestand je Lagerplatz, buchen Wareneingang vom Lieferanten ein und laden Bestand und alle Buchungen als Excel herunter.' },
+  { ziel: '#modeLager', immer: true, nur: () => erlaubt('lager'), vor: tourUebersicht, titel: 'Lager und Bestand', text: 'Bestand je Lagerplatz, Wareneingang einbuchen, Export als Excel. Eine Bestandszeile antippen: für eine Pickliste entnehmen, umlagern oder ausbuchen.' },
   { ziel: '#teamBtn', immer: true, nur: () => rang === 'hauptadmin', vor: tourUebersicht, titel: 'Team verwalten', text: 'Nur für Sie als Hauptadmin: Picker und Teamleiter anlegen, Bereiche zuweisen, Personen deaktivieren und Teamleiter-Passwörter zurücksetzen.' },
   { ziel: '#tourBtn', immer: true, vor: tourUebersicht, titel: 'Jederzeit wieder', text: 'Über das Fragezeichen starten Sie diesen Rundgang erneut. Die Picker haben ihren eigenen.' },
 ];
