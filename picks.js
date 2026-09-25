@@ -5,7 +5,7 @@
    Operationen müssen idempotent sein: ging die Antwort des Servers verloren, wird dieselbe Operation noch einmal
    auf einen Stand angewendet, der sie schon enthält (deshalb z. B. Buchungen am Zeitstempel wiedererkennen). */
 
-const PICK_FIELDS = ['artikel', 'charge', 'required', 'gebinde', 'ba', 'kunde', 'baOk']; // baOk: { von, ts } -- BA-Nr./Kunde vom Picker geprüft
+const PICK_FIELDS = ['artikel', 'charge', 'required', 'gebinde', 'ba', 'baOk']; // baOk: { von, ts } -- BA-Nr. vom Picker geprüft
 const cloneDoc = d => (d == null ? null : JSON.parse(JSON.stringify(d)));
 
 // doc: Pickliste oder null (gibt es nicht / gelöscht). Ergebnis: neue Pickliste oder null. doc bleibt unverändert.
@@ -36,7 +36,8 @@ function applyOp(doc, op) {
       if (l && !l.scans.some(s => s.ts === op.scan.ts && s.picker === op.scan.picker)) {
         l.scans.push(op.scan);
         // anzahl > 1: Sammelbuchung -- ein Gebinde gescannt, weitere gleiche vom Picker bestätigt
-        l.picked = Math.round((l.picked + op.scan.menge * (op.scan.anzahl || 1)) * 1000) / 1000; // 0,1 + 0,2 kg ohne Gleitkomma-Rest
+        // Einbuchen (am Ziel einlagern) ändert nicht, was gepickt ist -- nur Ausbuchen aus dem Lagerplatz zählt
+        if (op.scan.richtung !== 'ein') l.picked = Math.round((l.picked + op.scan.menge * (op.scan.anzahl || 1)) * 1000) / 1000; // 0,1 + 0,2 kg ohne Gleitkomma-Rest
       }
       break;
     }

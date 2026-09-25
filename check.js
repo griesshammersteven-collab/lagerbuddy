@@ -43,7 +43,7 @@ test('Echtes Foto: zentrierte Werte, BA-Nr.-Spalte, Tausenderpunkt', () => {
   const p = parsePicklist(grid, grid);
   assert.deepStrictEqual(p.lines.map(l => [l.artikel, l.bez, l.charge, l.required, l.einheit]),
     [['931000136000', '120ml.braunglas', '', 61000, 'Stück']]);
-  assert.deepStrictEqual(p.lines.map(l => [l.ba, l.kunde]), [['29991', '']], 'BA-Nr. erkannt, Kunde leer');
+  assert.deepStrictEqual(p.lines.map(l => l.ba), ['29991'], 'BA-Nr. erkannt');
   assert.strictEqual(p.skipped, 0);
   assert.strictEqual(p.von, 'B4'); assert.strictEqual(p.nach, 'Bühl');
 });
@@ -70,6 +70,17 @@ test('Echtes Foto quer: Fußzeile unter der Tabelle gehört nicht zur Position',
 // Weit weg, 5° schief, starkes JPEG: "‘Charge" kam mit 32 % Sicherheit -- ohne diese Überschrift begann die
 // Charge-Spalte erst bei "/Lot" und die Chargen rutschten in die Artikelspalte
 const weit = require('./test/ocr-pickliste-weit.json');
+// Foto 11.09.2026: BA-Nr. steht oben in ihrer zweizeiligen Zelle, gut eine Zeile höher als die Artikelnummer daneben
+test('BA-Nr. höher als die Artikelnummer (oben in der Zelle) wird trotzdem erkannt', () => {
+  for (const shift of [40, 70, 100]) {
+    const f = JSON.parse(JSON.stringify(echt));
+    for (const l of f.lines) for (const w of l.words || []) if (w.text === '29991') { w.bbox.y0 -= shift; w.bbox.y1 -= shift; }
+    const grid = picklistGridFromWords(f.lines, f.width);
+    const p = parsePicklist(grid, grid);
+    assert.deepStrictEqual(p.lines.map(l => [l.ba, l.artikel, l.bez, l.required]), [['29991', '931000136000', '120ml.braunglas', 61000]], shift + ' px');
+  }
+});
+
 test('Echtes Foto quer und ganzer Bildschirm: BA-Nr. erkannt', () => {
   for (const f of [quer, ganz]) {
     const grid = picklistGridFromWords(f.lines, f.width);
@@ -77,17 +88,15 @@ test('Echtes Foto quer und ganzer Bildschirm: BA-Nr. erkannt', () => {
   }
 });
 
-test('Excel: BA-Nr. in der Artikelzeile, Kunde darunter; ohne Spalte leer', () => {
+test('Excel: BA-Nr. (Kunde) in der Artikelzeile, auch mit Kopf nur "Kunde"; ohne Spalte leer', () => {
   const raw = [['Pickliste B4 -> Bühl'], ['BA-Nr.', 'Artikelnummer', 'Charge / Lot', 'Menge'], ['Kunde', 'Bezeichnung', '', 'best.'],
-    ['29991', '10006349PFL', '1446028', '225 kg'], ['Müller GmbH', 'Kakaobutter', 'GEKÜHLTE WARE', ''],
+    ['29991', '10006349PFL', '1446028', '225 kg'], ['', 'Kakaobutter', 'GEKÜHLTE WARE', ''],
     ['', '91000451', '500912', '24'], ['', 'Zucker fein', '', '']];
   const p = parsePicklist(raw);
-  assert.deepStrictEqual(p.lines.map(l => [l.artikel, l.ba, l.kunde, l.bez, l.hinweis]),
-    [['10006349PFL', '29991', 'Müller GmbH', 'Kakaobutter', 'GEKÜHLTE WARE'], ['91000451', '', '', 'Zucker fein', '']]);
-  const eigene = parsePicklist([['BA-Nr.', 'Kunde', 'Artikelnummer', 'Menge'], ['30012', 'Hofmann', '93100023', '8 kg']]);
-  assert.deepStrictEqual([eigene.lines[0].ba, eigene.lines[0].kunde], ['30012', 'Hofmann'], 'Kunde als eigene Spalte');
-  const ohne = parsePicklist([['Artikelnummer', 'Menge'], ['93100023', '8 kg']]);
-  assert.deepStrictEqual([ohne.lines[0].ba, ohne.lines[0].kunde], ['', ''], 'ohne Spalte leer');
+  assert.deepStrictEqual(p.lines.map(l => [l.artikel, l.ba, l.bez, l.hinweis]),
+    [['10006349PFL', '29991', 'Kakaobutter', 'GEKÜHLTE WARE'], ['91000451', '', 'Zucker fein', '']]);
+  assert.strictEqual(parsePicklist([['Kunde', 'Artikelnummer', 'Menge'], ['30012', '93100023', '8 kg']]).lines[0].ba, '30012', 'Kopf nur "Kunde"');
+  assert.strictEqual(parsePicklist([['Artikelnummer', 'Menge'], ['93100023', '8 kg']]).lines[0].ba, '', 'ohne Spalte leer');
 });
 
 test('Foto weit weg: unsichere Überschrift bestimmt trotzdem die Spalte', () => {
@@ -185,6 +194,22 @@ test('Kaputte Picklisten vom Server werden erkannt', () => {
   for (const d of [null, [], { lines: {} }, { lines: [null] }, { lines: [{ artikel: 'X' }] },
     { lines: [{ lid: 'a', artikel: 'X', required: 1, picked: 0, scans: [null] }] },
     { lines: [{ lid: 'a', artikel: 'X', required: '1', picked: 0, scans: [] }] }]) assert.ok(!gueltig(d), JSON.stringify(d));
+});
+
+test('Lagerplatz aus Barcode/Text: Schema H3.01.01.00.01, Lesefehler geradegezogen', () => {
+  const { findLagerplatz } = require('./parse.js');
+  const want = { 'H3.01.01.00.01': ['H3.01.01.00.01'], 'h3,01.01.00.01': ['H3.01.01.00.01'], 'H3.0l.01.00.01': ['H3.01.01.00.01'],
+    'H3.O1.01.00.01': ['H3.01.01.00.01'], 'H3 . 01 . 01 . 00 . 01': ['H3.01.01.00.01'], 'H12.01.02.03.04': ['H12.01.02.03.04'],
+    'H3.01.01.00': [], '3.01.01.02.01 und H3.01.01.02.02': ['H3.01.01.02.02'], 'L3.01.01.00.01': ['L3.01.01.00.01'] };
+  for (const [k, v] of Object.entries(want)) assert.deepStrictEqual(findLagerplatz(k), v, k);
+});
+
+test('Umlagern: Einbuchen am Ziel ändert "gepickt" nicht, Ausbuchen schon', () => {
+  const d = run(base(), [
+    { t: 'scan', lid: 'a', scan: { ts: 60, menge: 25, anzahl: 2, picker: 'AA', lagerplatz: 'H3.01.01.00.01', richtung: 'aus' } },
+    { t: 'scan', lid: 'a', scan: { ts: 61, menge: 25, anzahl: 2, picker: 'AA', lagerplatz: 'H9.01.01.00.01', richtung: 'ein' } }]);
+  assert.strictEqual(d.lines[0].picked, 50);
+  assert.strictEqual(d.lines[0].scans.length, 2);
 });
 
 if (failed) { console.log(`\n${failed} Test(s) fehlgeschlagen`); process.exit(1); }

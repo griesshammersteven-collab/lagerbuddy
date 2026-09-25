@@ -16,12 +16,12 @@ function tourMerken() {
 function tourDaten(fuer, master) {
   const t = Date.now(), s = (min, menge, von, extra) => ({ ts: t - min * 60000, menge, charge: '', picker: von, fp: 'tour' + min, ...extra });
   const offen = { id: 'tour-a', name: 'Beispiel · Pickliste B4 → Bühl', von: 'B4', nach: 'Bühl', fuer, importedAt: t, lines: [
-    { lid: 'a1', artikel: '931000136000', bez: '120ml Braunglas', charge: 'L2409', ba: '29991', kunde: 'Beispiel GmbH', baOk: { von: fuer, ts: t - 15 * 60000 },
+    { lid: 'a1', artikel: '931000136000', bez: '120ml Braunglas', charge: 'L2409', ba: '29991', baOk: { von: fuer, ts: t - 15 * 60000 },
       required: 3000, einheit: 'Stück', gebinde: 1000, picked: 3000,
       scans: [s(14, 1000, fuer), s(12, 1000, fuer, { anzahl: 2 })] },
-    { lid: 'a2', artikel: '0001446028', bez: 'Kakaobutter', charge: 'K24-117', ba: '29992', kunde: '', required: 350, einheit: 'kg', gebinde: 25, picked: 25,
+    { lid: 'a2', artikel: '0001446028', bez: 'Kakaobutter', charge: 'K24-117', ba: '29992', required: 350, einheit: 'kg', gebinde: 25, picked: 25,
       scans: [s(9, 25, fuer)] },
-    { lid: 'a3', artikel: '93100023', bez: 'Sheabutter', charge: 'S0815', ba: '', kunde: '', required: 60, einheit: 'kg', picked: 0, scans: [] }] };
+    { lid: 'a3', artikel: '93100023', bez: 'Sheabutter', charge: 'S0815', ba: '', required: 60, einheit: 'kg', picked: 0, scans: [] }] };
   if (!master) return [offen];
   const uebersprungen = { id: 'tour-c', name: 'Beispiel · Pickliste Kühlhaus → Linie 2', von: 'KH', nach: 'L2', fuer: 'SB', importedAt: t - 3600000, lines: [
     { lid: 'c1', artikel: '94000451', bez: 'Etiketten 50×30', charge: 'E77', required: 200, einheit: 'Stück', gebinde: 100, picked: 200, scans: [s(70, 100, 'SB', { anzahl: 2 })] },
@@ -33,7 +33,8 @@ function tourDaten(fuer, master) {
 }
 
 // Ansichten, die ein Schritt braucht -- jeder Schritt stellt seine her, damit auch "Zurück" stimmt
-const tourUebersicht = () => { if (!$('form').hidden) closeForm(); setMode('pick'); openPick(null); };
+// Ohne Bereich Pickliste (Team verwalten) zeigt der Rundgang nur die allgemeinen Schritte (immer: true)
+const tourUebersicht = () => { if (!$('form').hidden) closeForm(); if (erlaubt('pick')) { setMode('pick'); openPick(null); } };
 const tourListe = id => { if (!$('form').hidden) closeForm(); setMode('pick'); openPick(picks.find(p => p.id === id) || null); };
 function tourFormular() {
   tourListe('tour-a');
@@ -43,34 +44,37 @@ function tourFormular() {
 }
 
 const TOUR_PICKER = [
-  { titel: n => `Hallo ${n}!`, text: 'In einer Minute zeigt Ihnen dieser Rundgang, wie Sie mit LagerBuddy picken. Er nutzt eine Beispiel-Liste, gebucht wird nichts.' },
-  { ziel: '#pickerBtn', vor: tourUebersicht, titel: 'Ihr Kürzel', text: 'Hier steht, wer angemeldet ist. Schichtende oder Handy weitergeben: antippen und das nächste Kürzel wählen.' },
+  { immer: true, titel: n => `Hallo ${n}!`, text: 'In einer Minute zeigt Ihnen dieser Rundgang, wie Sie mit LagerBuddy picken. Er nutzt eine Beispiel-Liste, gebucht wird nichts.' },
+  { ziel: '#pickerBtn', immer: true, vor: tourUebersicht, titel: 'Ihr Kürzel', text: 'Hier steht, wer angemeldet ist. Schichtende oder Handy weitergeben: antippen und das nächste Kürzel wählen.' },
   { ziel: '#pickCards', vor: tourUebersicht, titel: 'Ihre Picklisten', text: 'Hier landen die Listen, die Ihnen der Teamleiter zuteilt, mit Fortschritt. Ist genau eine offen, öffnet die App sie beim Anmelden direkt.' },
-  { ziel: '.pick-line.current', vor: () => tourListe('tour-a'), titel: 'Immer der Reihe nach', text: 'Grün umrandet ist die Position, die jetzt dran ist: Artikel, Charge und Menge. Erledigte werden grün, der Rest wartet.' },
-  { ziel: '.pick-line.current .pick-ba', vor: () => tourListe('tour-a'), titel: 'BA-Nr. und Kunde prüfen', text: 'Vor dem ersten Gebinde gleichen Sie BA-Nr. und Kunde mit dem Auftrag ab, korrigieren bei Bedarf und bestätigen mit „Geprüft“. Die Prüfung steht mit Ihrem Kürzel im Excel.' },
-  { ziel: '#camBtn', vor: () => tourListe('tour-a'), titel: 'Gebinde scannen', text: 'Das Etikett jedes Gebindes fotografieren. Die App liest Artikel und Charge per Barcode und schlägt sofort Alarm, wenn etwas nicht zur Position passt.' },
+  { ziel: '.pick-line.current', vor: () => tourListe('tour-a'), titel: 'Immer der Reihe nach', text: 'Die Position mit „Jetzt buchen“ ist dran (grün umrandet): Artikel, Charge und Menge. Erledigte bekommen einen Haken, der Rest wartet.' },
+  { ziel: '.pick-line.current .pick-ba', vor: () => tourListe('tour-a'), titel: 'BA-Nr. prüfen', text: 'Die BA-Nr. steht für den Kunden. Vor dem ersten Gebinde gleichen Sie sie mit dem Auftrag ab, korrigieren bei Bedarf und bestätigen mit „Geprüft“. Die Prüfung steht mit Ihrem Kürzel im Excel.' },
+  { ziel: '#camBtn', vor: () => tourListe('tour-a'), titel: 'Gebinde scannen', text: 'Das Etikett jedes Gebindes fotografieren. Die App liest Artikel und Charge per Barcode und warnt sofort, wenn etwas nicht zur Position passt.' },
   { ziel: '.f:has(#menge)', vor: tourFormular, titel: 'Die App merkt sich die Menge', text: 'Beim ersten Gebinde geben Sie Menge und Einheit ein, danach ist beides vorausgefüllt. Nur bei einem Anbruch anpassen.' },
-  { ziel: '#anzahlRow', vor: tourFormular, titel: 'Viele gleiche Gebinde? Einmal scannen', text: 'Ein Gebinde scannen, bei der Anzahl „Alle“ tippen, bestätigen – fertig. Die Sammelbuchung läuft auf Ihr Kürzel: Mit OK bestätigen Sie, alle Gebinde geprüft zu haben.' },
+  { ziel: '#anzahlRow', vor: tourFormular, titel: 'Viele gleiche Gebinde? Einmal scannen', text: 'Ein Gebinde scannen, bei der Anzahl „Alle“ tippen, bestätigen, fertig. Die Sammelbuchung läuft auf Ihr Kürzel: Mit OK bestätigen Sie, alle Gebinde geprüft zu haben.' },
+  { ziel: '#lpRow', vor: tourFormular, titel: 'Lagerplatz und Ein/Aus', text: 'Dann den Lagerplatz scannen (Barcode oder die Nummer darunter) und wählen: „Ausbuchen“ beim Holen aus dem Regal, „Einbuchen“ beim Einlagern am Ziel. Der Bestand je Lagerplatz rechnet mit.' },
   { ziel: '.pick-skip-btn', vor: () => tourListe('tour-a'), titel: 'Ware nicht da?', text: 'Position überspringen und mit der nächsten weitermachen. Am Ende gibt der Teamleiter die fehlende Ware frei.' },
-  { ziel: '#syncState', nur: () => SYNC_ON, vor: () => tourListe('tour-a'), titel: 'Immer abgeglichen', text: 'Jede Buchung geht sofort an den Teamleiter. Kein Netz? Die App sammelt die Buchungen und schickt sie nach.' },
-  { ziel: '#tourBtn', vor: tourUebersicht, titel: 'Fragen?', text: 'Diesen Rundgang starten Sie jederzeit wieder über das Fragezeichen. Viel Erfolg beim Picken!' },
+  { ziel: '#syncState', nur: () => SYNC_ON, vor: () => tourListe('tour-a'), titel: 'Immer abgeglichen', text: 'Jede Buchung geht sofort an den Teamleiter. Kein Internet? Die App sammelt die Buchungen und schickt sie nach.' },
+  { ziel: '#tourBtn', immer: true, vor: tourUebersicht, titel: 'Fragen?', text: 'Diesen Rundgang starten Sie jederzeit wieder über das Fragezeichen. Viel Erfolg beim Picken!' },
 ];
 const TOUR_MASTER = [
-  { titel: n => `Willkommen, ${n}!`, text: 'Als Teamleiter verteilen Sie die Picklisten und behalten den Überblick. Der Rundgang zeigt Beispiel-Listen, Ihre echten Listen bleiben unberührt.' },
-  { ziel: '#pickerBtn', vor: tourUebersicht, titel: 'Teamleiter-Anmeldung', text: 'Grüner Rahmen = Teamleiter-Rechte. Antippen, um sich abzumelden oder das Handy weiterzugeben.' },
-  { ziel: '#modeSwitch', vor: tourUebersicht, titel: 'Zwei Modi', text: 'Pickliste: Aufträge verteilen und verfolgen. Erfassen: freie Liste, z. B. für Inventur oder Wareneingang, mit Excel-Download.' },
+  { immer: true, titel: n => `Willkommen, ${n}!`, text: 'Als Teamleiter verteilen Sie die Picklisten und behalten den Überblick. Der Rundgang zeigt Beispiel-Listen, Ihre echten Listen bleiben unberührt.' },
+  { ziel: '#pickerBtn', immer: true, vor: tourUebersicht, titel: 'Teamleiter-Anmeldung', text: 'Grüner Rahmen = Teamleiter-Rechte. Antippen, um sich abzumelden oder das Handy weiterzugeben.' },
+  { ziel: '#modeSwitch', nur: () => modiSichtbar(), vor: tourUebersicht, titel: 'Ihre Bereiche', text: 'Erfassen: freie Liste, z. B. für die Inventur, mit Excel-Download. Pickliste: Aufträge verteilen und verfolgen. Lager: Bestand je Lagerplatz.' },
   { ziel: '#pickFuerRow', vor: tourUebersicht, titel: '1. Picker auswählen', text: 'Für wen ist die Liste? Nur dieser Picker sieht sie auf seinem Handy.' },
-  { ziel: '#pickPhotoChoose', vor: tourUebersicht, titel: '2. Pickliste fotografieren', text: 'Die gedruckte Liste abfotografieren – die Texterkennung liest Artikelnummer, Bezeichnung, Charge und Menge, auch schräg oder im Querformat.' },
+  { ziel: '#pickPhotoChoose', vor: tourUebersicht, titel: '2. Pickliste fotografieren', text: 'Die gedruckte Liste fotografieren. Die Texterkennung liest Artikelnummer, Bezeichnung, Charge und Menge, auch schräg oder im Querformat.' },
   { ziel: '#pickChoose', vor: tourUebersicht, titel: 'Oder direkt aus Excel', text: 'Die Excel-Datei aus dem ERP geht auch: ohne Texterkennung, ohne Lesefehler.' },
-  { ziel: '#pickCards', vor: tourUebersicht, titel: 'Alle Listen im Blick', text: 'Jede Pickliste mit Picker und Fortschritt, live von allen Handys. Offene oben, erledigte mit Haken.' },
-  { ziel: '#pickFuerEditRow', vor: () => tourListe('tour-a'), titel: 'Umteilen', text: 'Picker krank oder in der Pause? Liste einem anderen zuteilen – sie wandert sofort auf dessen Handy.' },
-  { ziel: '.pick-line.current .pick-edit', vor: () => tourListe('tour-a'), titel: 'Prüfen und korrigieren', text: 'Nach dem Foto-Import kurz gegenchecken: Artikelnummer, Charge und Menge ändern nur Teamleiter. BA-Nr. und Kunde bestätigt der Picker vor dem Picken.' },
+  { ziel: '#pickCards', vor: tourUebersicht, titel: 'Alle Listen im Blick', text: 'Jede Pickliste mit Picker und Fortschritt, sofort von allen Handys. Offene oben, erledigte mit Haken.' },
+  { ziel: '#pickFuerEditRow', vor: () => tourListe('tour-a'), titel: 'Umteilen', text: 'Picker krank oder in der Pause? Liste einem anderen zuteilen. Sie wandert sofort auf dessen Handy.' },
+  { ziel: '.pick-line.current .pick-edit', vor: () => tourListe('tour-a'), titel: 'Prüfen und korrigieren', text: 'Nach dem Foto-Import kurz prüfen: Artikelnummer, Charge und Menge ändern nur Teamleiter. Die BA-Nr. bestätigt der Picker vor dem Picken.' },
   { ziel: '.pick-line.done .pick-count', vor: () => tourListe('tour-a'), titel: 'Jedes Gebinde nachvollziehbar', text: 'Wie viele Gebinde gescannt wurden, wie viele per Sammelbuchung bestätigt (mit Kürzel des Pickers) und was von Hand gebucht wurde.' },
   { ziel: '#pickApprove', vor: () => tourListe('tour-c'), titel: 'Fehlende Ware freigeben', text: 'Hat ein Picker Positionen übersprungen, weil die Ware fehlt, geben Sie sie hier frei und schließen die Liste ab.' },
   { ziel: '#pickExport', vor: () => tourListe('tour-b'), titel: 'Ergebnis als Excel', text: 'Fertige Listen als Excel: Soll und Ist je Position plus jede Buchung mit Picker, Charge und Uhrzeit.' },
-  { ziel: '#bar', vor: () => tourListe('tour-b'), titel: 'Ersetzen oder verwerfen', text: 'Liste per Excel neu einlesen oder ganz verwerfen – das dürfen nur Teamleiter.' },
-  { ziel: '#syncState', nur: () => SYNC_ON, vor: () => tourListe('tour-a'), titel: 'Live mit allen Handys', text: 'Alle Handys gleichen sich alle paar Sekunden ab. Umteilen, Freigeben und Verwerfen prüft der Server über Ihr Teamleiter-Passwort.' },
-  { ziel: '#tourBtn', vor: tourUebersicht, titel: 'Jederzeit wieder', text: 'Über das Fragezeichen starten Sie diesen Rundgang erneut. Die Picker haben ihren eigenen.' },
+  { ziel: '#bar', vor: () => tourListe('tour-b'), titel: 'Ersetzen oder verwerfen', text: 'Liste per Excel neu einlesen oder ganz verwerfen. Das dürfen nur Teamleiter.' },
+  { ziel: '#syncState', nur: () => SYNC_ON, vor: () => tourListe('tour-a'), titel: 'Alle Handys abgeglichen', text: 'Alle Handys gleichen sich alle paar Sekunden ab. Kein Internet? Die App schickt Änderungen nach.' },
+  { ziel: '#modeLager', immer: true, nur: () => erlaubt('lager'), vor: tourUebersicht, titel: 'Lager und Bestand', text: 'Hier sehen Sie den Bestand je Lagerplatz, buchen Wareneingang vom Lieferanten ein und laden Bestand und alle Buchungen als Excel herunter.' },
+  { ziel: '#teamBtn', immer: true, nur: () => rang === 'hauptadmin', vor: tourUebersicht, titel: 'Team verwalten', text: 'Nur für Sie als Hauptadmin: Picker und Teamleiter anlegen, Bereiche zuweisen, Personen deaktivieren und Teamleiter-Passwörter zurücksetzen.' },
+  { ziel: '#tourBtn', immer: true, vor: tourUebersicht, titel: 'Jederzeit wieder', text: 'Über das Fragezeichen starten Sie diesen Rundgang erneut. Die Picker haben ihren eigenen.' },
 ];
 
 let tour = null; // { schritte, i, vorher: { mode, openId, y }, timer }
@@ -78,7 +82,7 @@ function tourStart() {
   if (tour || !picker) return;
   // Halb erfasstes Etikett oder laufende Texterkennung nicht wegwerfen
   if (busy || !$('form').hidden) { toast('Bitte zuerst das Etikett fertig buchen oder verwerfen, dann den Rundgang starten.'); return; }
-  const schritte = (role === 'master' ? TOUR_MASTER : TOUR_PICKER).filter(s => !s.nur || s.nur());
+  const schritte = (role === 'master' ? TOUR_MASTER : TOUR_PICKER).filter(s => (!s.nur || s.nur()) && (s.immer || erlaubt('pick')));
   tour = { schritte, i: 0, vorher: { mode, openId, y: window.scrollY } };
   tourDemo = role === 'master' ? tourDaten('AA', true) : tourDaten(picker, false); // Teamleiter sehen Listen ihrer Picker
   recompute();
@@ -86,6 +90,7 @@ function tourStart() {
   $('tour').hidden = false;
   document.body.classList.add('touring');
   tour.timer = setInterval(tourPlatzieren, 400); // Liste kann neu gezeichnet werden (Abgleich), dann Ziel neu suchen
+  sperren(true);
   tourZeigen();
   $('tourNext').focus();
 }
@@ -96,6 +101,7 @@ function tourEnde() {
   tourMerken();
   $('tour').hidden = true;
   document.body.classList.remove('touring');
+  if ($('gate').hidden) sperren(false);
   tourDemo = [];
   if (!$('form').hidden) closeForm();
   openId = vorher.openId; recompute();
@@ -103,16 +109,19 @@ function tourEnde() {
   window.scrollTo({ top: vorher.y });
   // Beim ersten Anmelden kam die zugeteilte Liste erst während des Rundgangs vom Server: jetzt hinführen
   if (landenNachTour) { landenNachTour = false; if (!pick) landen(); }
+  if ($('gate').hidden) $('tourBtn').focus({ preventScroll: true });
 }
 function tourZeigen() {
   const s = tour.schritte[tour.i], n = tour.schritte.length;
   s.vor?.();
-  $('tourStep').textContent = `${tour.i + 1} / ${n}`;
+  $('tourStep').textContent = `Schritt ${tour.i + 1} von ${n}`;
   $('tourTitle').textContent = typeof s.titel === 'function' ? s.titel(picker) : s.titel;
   $('tourText').textContent = s.text;
   $('tourPrev').hidden = tour.i === 0;
   $('tourNext').textContent = tour.i === n - 1 ? 'Fertig' : 'Weiter';
   $('tourSkip').hidden = tour.i === n - 1;
+  const f = document.activeElement; // „Zurück“ auf Schritt 2 verschwindet gerade: Fokus fällt sonst auf body
+  if (!f || f === document.body || f.hidden) $('tourNext').focus();
   tourPlatzieren(); // Karte zuerst setzen: ihre Höhe bestimmt, wie viel Platz das Ziel hat
   const el = tourZiel();
   if (el) { // Ziel in den freien Bereich über der Karte schieben (zentriert, zu hohe Ziele oben bündig)

@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'sha256-ojkDICDGv1IDgM1tTEc0qEyDMDIQcrDXqbSGvK493nw='; img-src 'self' blob:; connect-src 'self' blob: data: https://*.supabase.co; worker-src 'self' blob:; manifest-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'sha256-fMWxMP2HjLxyar0Raox+0ppQyO4QR0vBmJeNBMl2EkQ='; img-src 'self' blob:; connect-src 'self' blob: data: https://*.supabase.co; worker-src 'self' blob:; manifest-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'">
 <meta name="referrer" content="no-referrer">
 <meta name="theme-color" content="#0B4F82">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -17,7 +17,7 @@
 :root{--bg:#061522;--card:#0c2233;--line:#1a3a52;--text:#eef4f8;--mute:#93aabb;--green:#22B84A;--blue:#0B4F82;--brand:linear-gradient(110deg,#22B84A 0%,#0A7F86 55%,#0B4F82 100%);--ok:#5cb85c;--warn:#e6953a;--err:#e5534b}
 *{box-sizing:border-box}
 html,body{margin:0;background:var(--bg);color:var(--text);font:16px/1.4 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;-webkit-text-size-adjust:100%}
-body{padding:0 16px calc(96px + env(safe-area-inset-bottom))}
+body{padding:0 16px calc(7em + env(safe-area-inset-bottom))} /* wächst mit der Schrift wie die untere Leiste */
 header{display:flex;align-items:center;justify-content:space-between;margin:0 -16px 16px;padding:calc(14px + env(safe-area-inset-top)) 16px 14px;background:var(--brand)}
 h1{margin:0;font-size:22px;letter-spacing:.3px;color:#fff}h1 span{font-weight:400}
 h2{font-size:15px;color:var(--mute);font-weight:600;margin:24px 0 8px;text-transform:uppercase;letter-spacing:.6px}
@@ -65,11 +65,53 @@ h2{font-size:15px;color:var(--mute);font-weight:600;margin:24px 0 8px;text-trans
 .pick-now{color:var(--green);font-size:13px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;margin-bottom:4px}
 .pick-note{color:var(--warn);font-weight:600}
 .pick-gebinde{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-top:6px}
+#modeSwitch{grid-template-columns:repeat(3,1fr)}
+#modeSwitch[data-n="2"]{grid-template-columns:1fr 1fr}
+.team-btn{width:30px;padding:3px 0;display:flex;align-items:center;justify-content:center}
+.team-btn svg{width:16px;height:16px;flex:none}
+.hmeta .picker-btn{flex:none}
+h1{white-space:nowrap}
+@media (max-width:400px){header h1{font-size:20px}}
+.team-btn.active{border-color:var(--green);background:#22b84a55}
+.pw-lead{font-weight:700;margin:0 0 4px}
+.pw-zweit{margin-top:10px}
+#tmNeu{margin-bottom:12px}
+#tmList{list-style:none;margin:0 0 12px;padding:0;display:grid;gap:8px}
+#tmList .entry{display:grid;width:100%}
+#tmList .card.aus{opacity:.55}
+.tm-kopf{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.tm-rolle{font-size:12px;font-weight:700;padding:2px 8px;border-radius:99px;color:var(--mute);background:#93aabb1f}
+.tm-rolle.admin{color:var(--green);background:#22b84a1f}
+.tm-rolle.hauptadmin{color:#04170b;background:var(--green)}
+.tm-form{display:grid;gap:12px;margin-bottom:12px;border-color:var(--green)}
+.tm-rollen,.tm-bereiche{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.tm-rollen .btn,.tm-bereiche .btn{padding:0 6px;font-size:15px}
+.tm-label{font-size:13px;color:var(--mute);margin:0 0 4px;display:flex;justify-content:space-between}
+.tm-aktiv{display:flex;align-items:center;gap:10px;font-weight:600}
+.tm-aktiv input{width:22px;height:22px;accent-color:var(--green)}
+.pw-box{margin-bottom:12px;border-color:var(--green)}
+.pw-box-head{font-weight:700}
+.pw-code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:26px;font-weight:700;letter-spacing:1.5px;color:var(--green);margin:10px 0 4px;user-select:all;word-break:break-all}
+.f .file{width:1px;height:1px;min-height:0;padding:0;border:0} /* versteckte Datei-/Auswahlfelder nicht wie Eingabefelder aufziehen */
+.lp-row{display:grid;grid-template-columns:1fr auto;gap:10px}
+.lp-row input{min-width:0;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.5px}
+.lp-row .btn{width:auto}
+.lager-info{margin-bottom:6px}
+.lager-info .pick-hint{margin:6px 0 0}
+.suche{width:100%;min-height:44px;padding:8px 12px;margin-bottom:10px;border-radius:10px;border:1px solid var(--line);background:#041019;color:var(--text);font:inherit;font-size:16px}
+#bestandList{list-style:none;margin:0 0 12px;padding:0;display:grid;gap:8px}
+.lp-head{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-weight:700;font-size:16px;color:var(--green);margin-bottom:4px}
+.lp-item{display:flex;justify-content:space-between;gap:10px;padding:6px 0;border-top:1px solid var(--line)}
+.lp-item:first-of-type{border-top:0}
+.lp-item .nums{font-size:15px}
+.lp-menge{font-weight:700;white-space:nowrap;text-align:right}
+.lp-item.neg .lp-menge{color:var(--err)}
+.lp-warn{color:var(--warn);font-size:13px;font-weight:600}
 .pick-ba{margin-top:10px;padding:10px 12px;border-radius:10px;border:1px solid #e6953a88;background:#e6953a14}
 .pick-ba.ok{border-color:#5cb85c66;background:#5cb85c12}
 .pick-ba-head{display:flex;justify-content:space-between;gap:8px;font-size:13px;font-weight:700;color:var(--warn)}
 .pick-ba.ok .pick-ba-head{color:var(--ok)}
-.pick-ba-grid{display:grid;grid-template-columns:1fr 1.4fr;gap:8px;margin-top:8px}
+.pick-ba-grid{display:grid;grid-template-columns:1fr;gap:8px;margin-top:8px}
 .pick-ba-grid label{display:flex;flex-direction:column;gap:2px;color:var(--mute);font-size:12px}
 .pick-ba-grid input{min-height:40px;padding:6px 10px;border-radius:8px;border:1px solid var(--line);background:#041019;color:var(--text);font:inherit;font-size:16px;width:100%}
 .pick-ba-ok{margin-top:8px;min-height:44px;font-size:15px;border-color:var(--warn)}
@@ -87,7 +129,7 @@ h2{font-size:15px;color:var(--mute);font-weight:600;margin:24px 0 8px;text-trans
 @keyframes s{to{transform:rotate(360deg)}}
 #form{margin-top:14px;display:grid;gap:12px}
 #preview{width:100%;max-height:34vh;object-fit:contain;border-radius:10px;background:#02090f}
-.f label{display:flex;justify-content:space-between;align-items:baseline;font-size:13px;color:var(--mute);margin-bottom:4px}
+.f label,.f .f-lbl{display:flex;justify-content:space-between;align-items:baseline;font-size:13px;color:var(--mute);margin-bottom:4px}
 .f input{width:100%;min-height:48px;padding:10px 12px;border-radius:10px;border:1px solid var(--line);background:#041019;color:var(--text);font:inherit;font-size:17px}
 .f input:focus{outline:2px solid var(--green);border-color:transparent}
 .f input[readonly]{opacity:.7}
@@ -104,8 +146,8 @@ h2{font-size:15px;color:var(--mute);font-weight:600;margin:24px 0 8px;text-trans
 .tag.ok{color:var(--ok);background:#5cb85c1f}.tag.check{color:var(--warn);background:#e6953a1f}
 #list{list-style:none;margin:0;padding:0;display:grid;gap:8px}
 #list li{display:grid;grid-template-columns:1fr auto auto;gap:4px;align-items:start}
-.hmeta{display:flex;align-items:center;gap:8px}
-.ver{color:#fff;opacity:.75;font-size:12px}
+.hmeta{display:flex;align-items:center;gap:6px}
+.ver{color:#fff;opacity:.75;font-size:11px;line-height:1.2}
 .picker-btn{background:#ffffff26;border:1px solid #ffffff40;color:#fff;font:inherit;font-size:12px;font-weight:600;padding:4px 10px;border-radius:99px;cursor:pointer;max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .picker-btn.is-master{border-color:var(--green);background:#22b84a33}
 .gate{position:fixed;inset:0;z-index:50;display:flex;align-items:center;padding:16px;background:var(--bg)}
@@ -143,7 +185,6 @@ h2{font-size:15px;color:var(--mute);font-weight:600;margin:24px 0 8px;text-trans
 .tour-card.oben{top:calc(16px + env(safe-area-inset-top))}
 .tour-card.mitte{top:50%;transform:translateY(-50%)}
 .tour-step{color:var(--green);font-size:12px;font-weight:700;letter-spacing:.6px}
-.tour-card h3{margin:4px 0 6px;font-size:19px}
 .tour-card p{margin:0 0 14px;line-height:1.45}
 .tour-nav{display:flex;gap:8px}
 .tour-nav .btn{width:auto}
@@ -153,20 +194,96 @@ h2{font-size:15px;color:var(--mute);font-weight:600;margin:24px 0 8px;text-trans
 #toast{position:fixed;z-index:60;left:16px;right:16px;bottom:calc(84px + env(safe-area-inset-bottom));background:#12304a;border:1px solid var(--line);border-radius:12px;padding:12px 14px;text-align:center;transition:opacity .2s;opacity:0;pointer-events:none}
 #toast.on{opacity:1}
 @media (min-width:640px){body{max-width:600px;margin:0 auto}header{margin:0 0 16px;border-radius:0 0 16px 16px}.bar{max-width:600px;margin:0 auto}}
+/* Design-Durchgang (Visual + Barrierefreiheit): Tokens, Kontrast AA, Fokus, Zielgrößen 44 px, Reflow 320 px */
+:root{color-scheme:dark;--err:#ff6b63;--err-bg:#b3261e;--field:#5b7d99;--focus:#fff;--ph:#8aa0b1;--ctl-s:44px;--fs-xs:13px;--fs-s:14px;--fs-m:16px;
+  --brand:linear-gradient(110deg,#0B4F82 0%,#0A7F86 55%,#22B84A 100%)}
+html{scroll-padding-bottom:120px}
+/* Header: Verlauf gespiegelt (weißer Text auf Blau), Pillen mit dunklem Grund, 44-px-Ziele */
+header{gap:8px;flex-wrap:wrap}
+.hmeta{gap:8px;flex-wrap:wrap;justify-content:flex-end}
+.picker-btn{min-height:44px;min-width:44px;padding:0 12px;font-size:var(--fs-s);background:#061522b3;border-color:#ffffff59}
+.picker-btn.is-master{background:#061522b3;border-color:var(--green);border-width:2px}
+.team-btn,.tour-btn{width:44px;padding:0}
+.team-btn.active{background:var(--green);border-color:var(--green);color:#04170b}
+.ver{display:none}
+.gate-ver{text-align:center;color:var(--mute);font-size:var(--fs-xs);margin:24px 0 0}
+/* Einheitlicher Fokusring */
+:focus-visible{outline:3px solid var(--focus);outline-offset:2px}
+.f input:focus,input:focus-visible,select:focus-visible{outline:2px solid var(--green);outline-offset:0;border-color:var(--green)}
+::placeholder{color:var(--ph);opacity:1}
+/* Feldrahmen >= 3:1 */
+.f input,.tl-form input,.lager-row input,.suche,.pick-fuer select,.pick-edit input,.pick-ba-grid input,.pick-gebinde input,.pick-route input{border-color:var(--field)}
+.pick-edit input,.pick-ba-grid input,.pick-route input{min-height:var(--ctl-s);font-size:var(--fs-m)}
+.pick-gebinde input{min-height:var(--ctl-s);width:80px;font-size:var(--fs-m)}
+.pick-back,.pick-skip-btn{min-height:var(--ctl-s)}
+/* Buttons: Innenabstand bei Umbruch, ruhiger Disabled-Zustand, Reflow */
+.btn{line-height:1.2;padding:6px 16px}
+.btn:disabled{opacity:1;background:transparent;border:1px dashed var(--field);color:var(--mute);cursor:not-allowed}
+.row,#modeSwitch[data-n="2"]{grid-template-columns:repeat(2,minmax(0,1fr))}
+#modeSwitch{grid-template-columns:repeat(3,minmax(0,1fr))}
+.mode-btn{padding:0 6px}
+.mode-btn.active{background:#22b84a26;border:2px solid var(--green);color:var(--text)}
+.row .btn{font-size:15px;padding:6px 10px}
+@media (max-width:400px){.big{font-size:17px}}
+#scan{margin-bottom:16px}
+/* Auswahl-Kacheln im Formular (Ein/Aus, Scannen) sahen aus wie leere Felder */
+.f label.btn{display:flex;justify-content:center;align-items:center;margin:0;font-size:var(--fs-m);color:var(--text)}
+.unit label:has(input:checked)::before{content:"✓" / "";font-weight:700}
+.f>label,.tm-label{flex-wrap:wrap;gap:2px 8px}
+.tm-rollen,.tm-bereiche{grid-template-columns:repeat(auto-fit,minmax(96px,1fr))}
+.nums{word-break:normal;overflow-wrap:anywhere}
+.bar:not(:has(> .barGroup:not([hidden]))){display:none}
+/* Fehler und Zustände: Kontrast, nicht nur über Farbe/Deckkraft */
+.label-check.bad{background:var(--err-bg);border-color:var(--err-bg)}
+.pick-line.waiting,#tmList .card.aus{opacity:1;background:transparent;border-style:dashed}
+.pick-line.waiting .nums,.pick-line.waiting .pick-ba-head,#tmList .card.aus .nums{color:var(--mute)}
+.pick-line.waiting .pick-ba,.pick-line.done .pick-ba:not(.ok){border-color:var(--line);background:none}
+.pick-line.done .pick-ba:not(.ok) .pick-ba-head{color:var(--mute)}
+.pick-banner{color:var(--text)}
+.pick-banner.warn{color:var(--warn);border-color:#e6953a88}
+h2.pick-name{margin:10px 0 8px;font-size:var(--fs-s);font-weight:400;text-transform:none;letter-spacing:0;color:var(--mute)}
+#gateMasters{grid-template-columns:repeat(auto-fill,minmax(112px,1fr))}
+/* Schriftskala: Minimum 13 px */
+h2,.gate-lead{font-size:var(--fs-s);letter-spacing:.08em}
+.tag,.tm-rolle,.tour-step,.pick-edit label,.pick-ba-grid label{font-size:var(--fs-xs)}
+/* Rundgang: Karte ruhiger, Knöpfe umbrechen bei 320 px */
+.tour-card{border-color:var(--field)}
+.tour-card h2{margin:4px 0 6px;font-size:19px;color:var(--text);text-transform:none;letter-spacing:0;font-weight:700}
+.tour-nav{flex-wrap:wrap}
+#tourNext{min-width:0;flex:1 1 auto}
+/* Toast: invertiert, antippen schließt */
+#toast{background:var(--text);color:var(--bg);border:0;font-weight:600;box-shadow:0 8px 24px #000a}
+.bar{grid-template-columns:minmax(0,2fr) minmax(0,1fr)}
+.bar .danger{width:100%}
+body{overflow-wrap:break-word}
+.btn{overflow-wrap:anywhere;hyphens:auto}
+[tabindex="-1"]:focus{outline:none} /* reine Fokusziele (Überschrift, Formular): kein Ring */
+@media (prefers-reduced-motion:reduce){*{transition:none!important}.btn:active{transform:none}.spin{animation-duration:3s}}
+/* Runde 2: keine Worttrennung in Knöpfen bei 320/390 px */
+.bar:has(#pickBar:not([hidden])){grid-template-columns:repeat(2,minmax(0,1fr))}
+@media (max-width:360px){#modeSwitch{gap:6px}#modeSwitch .mode-btn{font-size:14px;padding:0 4px}.bar .btn svg{display:none}}
+.tm-rollen,.tm-bereiche{display:flex;flex-wrap:wrap;gap:8px}
+.tm-rollen .btn,.tm-bereiche .btn{flex:1 1 auto;width:auto;padding:0 10px;position:relative}
+.tm-rollen label:has(input:checked)::before,.tm-bereiche label:has(input:checked)::before{position:absolute;top:4px;left:7px;font-size:13px;line-height:1}
+.pick-line.done .pick-ba-ok{border-color:var(--field)}
+/* Runde 3: Lagerplatz in voller Breite prüfbar, Hinweis im Formular nicht doppelt */
+.lp-row{grid-template-columns:1fr}
+.lp-row .btn{width:100%}
+#toast[aria-hidden="true"]{display:none}
 </style>
 </head>
 <body>
-<div class="gate" id="gate">
+<div class="gate" id="gate" role="dialog" aria-modal="true" aria-labelledby="gateTitel">
   <div class="gate-card">
-    <button class="btn primary gate-upd" type="button" id="gateUpd" hidden>Neue Version verfügbar – jetzt aktualisieren</button>
-    <h1>Lager<span>Buddy</span></h1>
+    <button class="btn primary gate-upd" type="button" id="gateUpd" hidden>Neue Version: jetzt aktualisieren</button>
+    <h1 id="gateTitel" tabindex="-1">Lager<span>Buddy</span></h1>
     <form id="lagerForm" hidden autocomplete="off">
       <p class="gate-lead">Handy einrichten</p>
       <div class="lager-row">
         <input id="lagerCode" type="password" placeholder="Lager-Code" aria-label="Lager-Code" maxlength="100" autocapitalize="off" spellcheck="false">
         <button class="btn primary" type="submit" id="lagerBtn">Weiter</button>
       </div>
-      <p class="pick-hint">Einmal pro Handy. Den Lager-Code gibt es beim Teamleiter.</p>
+      <p class="pick-hint">Nur einmal pro Handy nötig. Den Lager-Code bekommen Sie vom Teamleiter.</p>
     </form>
     <div id="gateWho">
       <p class="gate-lead">Wer sind Sie?</p>
@@ -183,11 +300,26 @@ h2{font-size:15px;color:var(--mute);font-weight:600;margin:24px 0 8px;text-trans
           <button class="btn primary" type="submit" id="tlBtn">Anmelden</button>
         </div>
       </form>
+      <form id="pwForm" class="tl-form" hidden autocomplete="on">
+        <p class="pw-lead" id="pwLabel">Eigenes Passwort festlegen</p>
+        <p class="pick-hint">Das Startpasswort gilt nur für die erste Anmeldung. Bitte jetzt ein eigenes wählen (mindestens 8 Buchstaben oder Ziffern).</p>
+        <input id="pwUser" name="username" autocomplete="username" hidden>
+        <label for="pwNeu">Neues Passwort</label>
+        <input id="pwNeu" name="new-password" type="password" autocomplete="new-password" autocapitalize="characters" autocorrect="off" spellcheck="false" maxlength="100">
+        <label for="pwNeu2" class="pw-zweit">Neues Passwort wiederholen</label>
+        <input id="pwNeu2" type="password" autocomplete="new-password" autocapitalize="characters" autocorrect="off" spellcheck="false" maxlength="100">
+        <p class="tl-err" id="pwErr" role="alert" hidden></p>
+        <div class="row">
+          <button class="btn" type="button" id="pwCancel">Abbrechen</button>
+          <button class="btn primary" type="submit" id="pwBtn">Speichern</button>
+        </div>
+      </form>
     </div>
+    <p class="gate-ver" id="gateVer"></p>
   </div>
 </div>
 
-<header><h1>Lager<span>Buddy</span></h1><div class="hmeta"><button class="picker-btn tour-btn" type="button" id="tourBtn" aria-label="Rundgang starten" title="Rundgang">?</button><button class="picker-btn" type="button" id="pickerBtn"></button><span class="ver" id="ver"></span></div></header>
+<header><h1>Lager<span>Buddy</span></h1><div class="hmeta"><button class="picker-btn team-btn" type="button" id="teamBtn" aria-label="Team verwalten" aria-pressed="false" title="Team verwalten" hidden><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg></button><button class="picker-btn tour-btn" type="button" id="tourBtn" aria-label="Rundgang starten" title="Rundgang starten">?</button><button class="picker-btn" type="button" id="pickerBtn"></button><span class="ver" id="ver"></span></div></header>
 
 <main>
   <div class="card update" id="update" role="status" hidden>
@@ -197,6 +329,7 @@ h2{font-size:15px;color:var(--mute);font-weight:600;margin:24px 0 8px;text-trans
   <div class="row mode" id="modeSwitch" hidden>
     <button class="btn mode-btn active" type="button" id="modeScan" aria-pressed="true">Erfassen</button>
     <button class="btn mode-btn" type="button" id="modePick" aria-pressed="false">Pickliste</button>
+    <button class="btn mode-btn" type="button" id="modeLager" aria-pressed="false">Lager</button>
   </div>
 
   <section id="scan">
@@ -206,23 +339,23 @@ h2{font-size:15px;color:var(--mute);font-weight:600;margin:24px 0 8px;text-trans
       <input class="file" type="file" accept="image/*" capture="environment" id="cam">
     </label>
     <div class="row">
-      <label class="btn" id="galBtn">Aus Galerie<input class="file" type="file" accept="image/*" id="gal"></label>
-      <button class="btn" type="button" id="manual">Manuell erfassen</button>
+      <label class="btn" id="galBtn">Foto auswählen<input class="file" type="file" accept="image/*" id="gal"></label>
+      <button class="btn" type="button" id="manual">Von Hand erfassen</button>
     </div>
   </section>
 
   <section id="busy" class="card" hidden role="status" aria-live="polite"><div class="spin"></div><p id="busymsg">Etikett wird gelesen …</p></section>
 
-  <form id="form" class="card" hidden autocomplete="off">
+  <form id="form" class="card" hidden autocomplete="off" tabindex="-1" aria-label="Gebinde erfassen">
     <img id="preview" alt="Foto des Etiketts" hidden>
     <div id="labelCheck" class="label-check" role="status" hidden></div>
     <div class="f"><label for="artikel">Artikelnummer <span class="tag" id="t-artikel"></span></label><input id="artikel" name="artikel" autocapitalize="off" spellcheck="false" maxlength="64"></div>
     <div class="f"><label for="bez1">Bezeichnung 1 <span class="tag" id="t-bez1"></span></label><input id="bez1" name="bez1" maxlength="200"></div>
     <div class="f"><label for="bez2">Bezeichnung 2 <span class="tag" id="t-bez2"></span></label><input id="bez2" name="bez2" maxlength="200"></div>
     <div class="f"><label for="charge">Charge <span class="tag" id="t-charge"></span></label><input id="charge" name="charge" autocapitalize="off" spellcheck="false" maxlength="64"></div>
-    <div class="f"><label for="lagerplatz">Lagerplatz <span class="sub">optional</span></label><input id="lagerplatz" name="lagerplatz" autocapitalize="characters" maxlength="40" placeholder="z. B. B4 oder Bühl"></div>
+    <div class="f" id="lpFreiRow"><label for="lagerplatz">Lagerplatz <span class="sub">optional</span></label><input id="lagerplatz" name="lagerplatz" autocapitalize="characters" maxlength="40" placeholder="z. B. B4 oder Bühl"></div>
     <div class="f"><label for="menge">Menge pro Gebinde <span class="tag" id="t-menge"></span></label><input id="menge" name="menge" type="text" inputmode="decimal" placeholder="z. B. 24 oder 12,5"></div>
-    <div class="row unit">
+    <div class="row unit" role="radiogroup" aria-label="Einheit">
       <label class="btn"><input class="file" type="radio" name="einheit" value="Stück"> Stück</label>
       <label class="btn"><input class="file" type="radio" name="einheit" value="kg"> kg</label>
     </div>
@@ -235,24 +368,42 @@ h2{font-size:15px;color:var(--mute);font-weight:600;margin:24px 0 8px;text-trans
         <button class="btn" type="button" id="anzAlle" hidden></button>
       </div>
     </div>
+    <div class="f" id="lpRow" hidden>
+      <label for="lpCode">Lagerplatz <span class="tag" id="t-lp"></span></label>
+      <div class="lp-row">
+        <input id="lpCode" autocapitalize="characters" autocomplete="off" spellcheck="false" maxlength="20" placeholder="Lagerplatz scannen">
+        <label class="btn" id="lpBtn">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 7V5a2 2 0 0 1 2-2h2"/><path d="M17 3h2a2 2 0 0 1 2 2v2"/><path d="M21 17v2a2 2 0 0 1-2 2h-2"/><path d="M7 21H5a2 2 0 0 1-2-2v-2"/><path d="M7 8v8"/><path d="M11 8v8"/><path d="M14 8v8"/><path d="M17 8v8"/></svg>
+          Scannen<input class="file" type="file" accept="image/*" capture="environment" id="lpCam">
+        </label>
+      </div>
+    </div>
+    <div class="f" id="richtungRow" hidden>
+      <div class="f-lbl" id="richtungLbl">Ein- oder ausbuchen? <span class="tag" id="t-richtung"></span></div>
+      <div class="row unit richtung" role="radiogroup" aria-labelledby="richtungLbl">
+        <label class="btn"><input class="file" type="radio" name="richtung" value="aus"> Ausbuchen</label>
+        <label class="btn"><input class="file" type="radio" name="richtung" value="ein"> Einbuchen</label>
+      </div>
+    </div>
+    <p class="label-check info" id="formFehler" role="alert" hidden></p>
     <button class="btn primary" type="submit" id="formSubmit">Zur Liste hinzufügen</button>
     <button class="btn" type="button" id="cancel">Verwerfen</button>
   </form>
 
   <div id="freeListView">
-    <h2>Liste <span id="count"></span></h2>
+    <h2>Erfasste Etiketten <span id="count"></span></h2>
     <ul id="list"></ul>
     <p class="empty" id="empty">Noch nichts erfasst. Fotografieren Sie das erste Etikett.</p>
   </div>
 
-  <input class="file" type="file" accept=".xlsx,.xls" id="pickFile">
-  <input class="file" type="file" accept="image/*" capture="environment" id="pickCam">
+  <input class="file" type="file" accept=".xlsx,.xls" id="pickFile" tabindex="-1" aria-hidden="true">
+  <input class="file" type="file" accept="image/*" capture="environment" id="pickCam" tabindex="-1" aria-hidden="true">
   <div id="pickView" hidden>
     <p class="sync-state" id="syncState" role="status" hidden></p>
     <div id="pickOverview">
       <h2 id="pickCardsHead">Picklisten</h2>
       <ul id="pickCards"></ul>
-      <p class="empty" id="pickNone" hidden>Für Sie liegt gerade keine Pickliste vor.</p>
+      <p class="empty" id="pickNone" hidden>Keine Pickliste für Sie. Neue teilt der Teamleiter zu.</p>
       <div class="card" id="pickEmpty">
         <label class="pick-fuer" id="pickFuerRow" hidden>Für Picker
           <select id="pickFuer"></select>
@@ -261,29 +412,82 @@ h2{font-size:15px;color:var(--mute);font-weight:600;margin:24px 0 8px;text-trans
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3z"/><circle cx="12" cy="13" r="3"/></svg>
           Pickliste fotografieren
         </button>
-        <label class="btn" id="pickGalBtn">Aus Galerie<input class="file" type="file" accept="image/*" id="pickGal"></label>
-        <button class="btn" type="button" id="pickChoose" hidden>Pickliste-Excel auswählen</button>
-        <p class="pick-hint">Die gedruckte Pickliste fotografieren – Artikelnummer, Bezeichnung, Charge und Menge werden per Texterkennung eingelesen. Bitte danach prüfen, das ist nicht so zuverlässig wie eine Excel-Datei.</p>
-        <p class="pick-hint" id="pickHintMaster" hidden>Als Teamleiter geht auch die gewohnte Excel-Datei (Artikelnummer/Bezeichnung, Charge/Lot, Menge best., oder einfache Tabellen mit „Artikelnummer" und „Menge"/„Anzahl"/„Gewicht"). Die Pickliste sieht danach nur der ausgewählte Picker.</p>
+        <label class="btn" id="pickGalBtn">Foto auswählen<input class="file" type="file" accept="image/*" id="pickGal"></label>
+        <button class="btn" type="button" id="pickChoose" hidden>Pickliste aus Excel laden</button>
+        <p class="pick-hint">Gedruckte Pickliste fotografieren. Die App liest Artikelnummer, Bezeichnung, Charge und Menge. Danach jede Zeile prüfen: Fotos liest die App nicht so sicher wie Excel.</p>
+        <p class="pick-hint" id="pickHintMaster" hidden>Als Teamleiter geht auch die gewohnte Excel-Datei (Artikelnummer/Bezeichnung, Charge/Lot, Menge best., oder einfache Tabellen mit „Artikelnummer“ und „Menge“/„Anzahl“/„Gewicht“). Die Pickliste sieht danach nur der ausgewählte Picker.</p>
       </div>
     </div>
     <div id="pickBody" hidden>
-      <button class="btn pick-back" type="button" id="pickBack">← Alle Picklisten</button>
-      <div class="card pick-banner" id="pickBanner"></div>
+      <button class="btn pick-back" type="button" id="pickBack"><span aria-hidden="true">←</span> Alle Picklisten</button>
+      <div class="card pick-banner" id="pickBanner" role="status"></div>
       <button class="btn primary" type="button" id="pickApprove" hidden>Fehlende Positionen freigeben</button>
       <button class="btn primary" type="button" id="pickExport" hidden>Fertige Pickliste als Excel herunterladen</button>
-      <div class="pick-name" id="pickName"></div>
+      <h2 class="pick-name" id="pickName"></h2>
       <label class="pick-fuer" id="pickFuerEditRow" hidden>Picker
         <select id="pickFuerEdit"></select>
       </label>
       <div class="pick-route">
-        <input id="pickVon" placeholder="Von (Lagerplatz)" maxlength="40" autocapitalize="characters">
+        <input id="pickVon" placeholder="Von (Lagerplatz)" aria-label="Von Lagerplatz" maxlength="40" autocapitalize="characters">
         <span>→</span>
-        <input id="pickNach" placeholder="Nach (Lagerplatz)" maxlength="40" autocapitalize="characters">
+        <input id="pickNach" placeholder="Nach (Lagerplatz)" aria-label="Nach Lagerplatz" maxlength="40" autocapitalize="characters">
       </div>
       <button class="btn" type="button" id="pickPhotoReplace">Pickliste per Foto ersetzen</button>
       <ul id="pickList"></ul>
     </div>
+  </div>
+  <div id="lagerView" hidden>
+    <p class="sync-state" id="lagerSync" role="status" hidden></p>
+    <div class="card lager-info">
+      <b>Einbuchen und Ausbuchen</b>
+      <p class="pick-hint">Gebinde-Etikett fotografieren, dann den Lagerplatz scannen und „Einbuchen“ (z. B. Wareneingang vom Lieferanten) oder „Ausbuchen“ wählen. Umlagern für eine Pickliste geht direkt in der Pickliste.</p>
+    </div>
+    <h2>Bestand <span id="bestandCount"></span></h2>
+    <input id="bestandSuche" class="suche" type="search" placeholder="Lagerplatz, Artikel, Charge" autocomplete="off" spellcheck="false" aria-label="Bestand durchsuchen">
+    <ul id="bestandList"></ul>
+    <p class="empty" id="bestandLeer">Noch nichts eingebucht.</p>
+    <button class="btn" type="button" id="bestandExport" hidden>Bestand und Buchungen als Excel herunterladen</button>
+  </div>
+  <div id="teamView" hidden>
+    <button class="btn pick-back" type="button" id="tmZurueck"><span aria-hidden="true">←</span> Zurück zur App</button>
+    <h2>Team verwalten</h2>
+    <div class="card pw-box" id="tmPwBox" role="status" hidden>
+      <div class="pw-box-head" id="tmPwTitel"></div>
+      <div class="pw-code" id="tmPwCode"></div>
+      <p class="pick-hint" id="tmPwHint"></p>
+      <div class="row">
+        <button class="btn" type="button" id="tmPwCopy">Kopieren</button>
+        <button class="btn primary" type="button" id="tmPwOk">Weitergegeben, schließen</button>
+      </div>
+    </div>
+    <form class="card tm-form" id="tmForm" hidden autocomplete="off">
+      <b id="tmTitel" tabindex="-1">Person anlegen</b>
+      <div class="f"><label for="tmKuerzel">Kürzel <span class="sub">2 bis 8 Zeichen, zum Anmelden</span></label><input id="tmKuerzel" maxlength="8" autocapitalize="off" spellcheck="false"></div>
+      <div class="f"><label for="tmName">Name <span class="sub">optional</span></label><input id="tmName" maxlength="60"></div>
+      <div><p class="tm-label" id="tmRolleLbl">Rolle</p>
+        <div class="tm-rollen unit" role="radiogroup" aria-labelledby="tmRolleLbl">
+          <label class="btn"><input class="file" type="radio" name="tmRolle" value="picker"> Picker</label>
+          <label class="btn"><input class="file" type="radio" name="tmRolle" value="admin"> Teamleiter</label>
+          <label class="btn"><input class="file" type="radio" name="tmRolle" value="hauptadmin"> Hauptadmin</label>
+        </div>
+      </div>
+      <p class="pick-hint" id="tmRolleHint"></p>
+      <div><p class="tm-label" id="tmBereichLbl">Bereiche <span class="sub">was die Person in der App sieht</span></p>
+        <div class="tm-bereiche unit" role="group" aria-labelledby="tmBereichLbl">
+          <label class="btn"><input class="file" type="checkbox" name="tmBereich" value="erfassen"> Erfassen</label>
+          <label class="btn"><input class="file" type="checkbox" name="tmBereich" value="pickliste"> Pickliste</label>
+          <label class="btn"><input class="file" type="checkbox" name="tmBereich" value="lager"> Lager</label>
+        </div>
+      </div>
+      <label class="tm-aktiv"><input type="checkbox" id="tmAktiv"> Aktiv (erscheint beim Anmelden)</label>
+      <p class="tl-err" id="tmErr" role="alert" hidden></p>
+      <button class="btn primary" type="submit" id="tmSave">Speichern</button>
+      <button class="btn" type="button" id="tmReset" hidden>Passwort zurücksetzen</button>
+      <button class="btn" type="button" id="tmCancel">Abbrechen</button>
+    </form>
+    <button class="btn primary" type="button" id="tmNeu">+ Person anlegen</button>
+    <ul id="tmList"></ul>
+    <p class="pick-hint" id="tmHint">Picker melden sich nur mit dem Kürzel an. Teamleiter und Hauptadmin bekommen beim Anlegen ein Startpasswort und wählen bei der ersten Anmeldung ein eigenes.</p>
   </div>
 </main>
 
@@ -293,18 +497,18 @@ h2{font-size:15px;color:var(--mute);font-weight:600;margin:24px 0 8px;text-trans
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 15V3"/><path d="m7 10 5 5 5-5"/><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/></svg>
       Excel herunterladen
     </button>
-    <button class="btn danger" type="button" id="clear">Leeren</button>
+    <button class="btn danger" type="button" id="clear">Liste leeren</button>
   </div>
   <div class="barGroup" id="pickBar" hidden>
     <button class="btn" type="button" id="pickReplace">Per Excel ersetzen</button>
-    <button class="btn danger" type="button" id="pickClear">Verwerfen</button>
+    <button class="btn danger" type="button" id="pickClear">Pickliste verwerfen</button>
   </div>
 </div>
 <div class="tour" id="tour" hidden role="dialog" aria-modal="true" aria-labelledby="tourTitle" aria-describedby="tourText">
   <div class="tour-spot" id="tourSpot"></div>
   <div class="card tour-card" id="tourCard">
     <div class="tour-step" id="tourStep"></div>
-    <h3 id="tourTitle"></h3>
+    <h2 id="tourTitle"></h2>
     <p id="tourText"></p>
     <div class="tour-nav">
       <button class="btn" type="button" id="tourSkip">Beenden</button>
@@ -315,9 +519,11 @@ h2{font-size:15px;color:var(--mute);font-weight:600;margin:24px 0 8px;text-trans
 </div>
 <div id="toast" role="status" aria-live="polite"></div>
 
-<script src="parse.js?v=2026-09-25.1"></script>
-<script src="picks.js?v=2026-09-25.1"></script>
-<script src="app.js?v=2026-09-25.1"></script>
-<script src="tour.js?v=2026-09-25.1"></script>
+<script src="parse.js?v=2026-09-25.8"></script>
+<script src="picks.js?v=2026-09-25.8"></script>
+<script src="app.js?v=2026-09-25.8"></script>
+<script src="lager.js?v=2026-09-25.8"></script>
+<script src="team.js?v=2026-09-25.8"></script>
+<script src="tour.js?v=2026-09-25.8"></script>
 </body>
 </html>

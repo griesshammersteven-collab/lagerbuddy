@@ -38,7 +38,11 @@ dürfen im Code stehen. Geschützt wird über den Lager-Code, den nur der Server
 - **Offline**: Buchungen ohne Netz werden gesammelt und nachgeschickt. Die Pickliste zeigt, wie viele warten.
 - **Konflikte**: Bucht ein Picker, während der Teamleiter eine Position korrigiert, bleibt beides erhalten.
 - **Code ändern**: `zugang.sql` mit neuen Werten nochmal ausführen. Die Handys fragen dann neu nach dem Lager-Code.
-- **Neuer Teamleiter**: Zeile in `zugang.sql` ergänzen und das Kürzel in `app.js` bei `MASTERS` eintragen.
+- **Team verwalten**: Der Hauptadmin (CMue) tippt oben auf das Personen-Symbol. Dort legt er Picker und Teamleiter
+  an, wählt die Bereiche (Erfassen, Pickliste, Lager), deaktiviert Personen und setzt Teamleiter-Passwörter zurück.
+  Neue Teamleiter bekommen ein Startpasswort, das nur einmal angezeigt wird, und wählen beim ersten Anmelden ein
+  eigenes. Die Liste liegt in der Tabelle `lb_personen`; `zugang.sql` ist nur noch für den Lager-Code und die
+  ersten Passwörter von CMue und MD nötig.
 - **Kostenloses Projekt**: Supabase pausiert es nach einer Woche ganz ohne Nutzung. Im Alltag passiert das nicht,
   nach Betriebsferien im Supabase-Dashboard einmal **Restore** klicken.
 - Etikettfotos verlassen das Handy nie. Auf den Server gehen nur die ausgelesenen Picklisten-Daten.

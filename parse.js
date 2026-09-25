@@ -115,7 +115,7 @@ function classifyLabelColor(pixels) {
 
 /* ---------- Pickliste ---------- */
 const normH = h => String(h ?? '').toLowerCase().replace(/[^a-zäöüß0-9]/g, '');
-// Spalte "BA-Nr." (Betriebsauftrag) mit "Kunde" in der zweiten Kopfzeile; "8A-Nr." = gängiger Lesefehler im Foto
+// Spalte "BA-Nr." (Betriebsauftragsnummer = Kunde, "Kunde" steht in der zweiten Kopfzeile); "8A-Nr." = Lesefehler im Foto
 const BA_HEAD = /^([b8]anr|[b8]anummer|kunde)/;
 const pickErr = m => Object.assign(new Error(m), { userMessage: true }); // erwartbarer Fehler: nur Toast, kein Konsolenfehler
 const normArt = s => String(s ?? '').toUpperCase().replace(/\s+/g, '');
@@ -166,10 +166,9 @@ function parsePicklist(raw, fmt = raw) {
   const colCharge = col(['charge', 'lot']), colMenge = col(['menge']), colEinheit = col(['einheit']);
   const colAnzahl = col(['anzahl']), colGewicht = col(['gewicht']), colBez = col(['bezeichnung']);
   const colGebinde = col(['gebinde']); // z. B. "Gebindegröße": kg/Stück pro Gebinde, falls in der Vorlage vorhanden
-  // BA-Nr./Kunde: meist eine Spalte mit BA-Nr. in der Artikelzeile und Kunde darunter; gibt es "Kunde" als eigene
-  // Spalte, steht er in der Artikelzeile. Fehlt die Spalte, bleibt beides leer -- der Picker prüft und ergänzt es.
-  const colBA = col(['banr', '8anr', 'banummer']), colKundeEigene = col(['kunde']);
-  const colKunde = colKundeEigene >= 0 && colKundeEigene !== colBA ? colKundeEigene : -1;
+  // BA-Nr. (steht für den Kunden): in der Artikelzeile; Kopf "BA-Nr." oder nur "Kunde". Fehlt die Spalte, bleibt sie
+  // leer -- der Picker prüft und ergänzt sie.
+  const colBA = [['banr', '8anr', 'banummer'], ['kunde']].map(col).find(j => j >= 0) ?? -1;
   if (colMenge < 0 && colAnzahl < 0 && colGewicht < 0) throw pickErr('Spalte "Menge", "Anzahl" oder "Gewicht" nicht gefunden.');
 
   const text = (i, j) => {
@@ -192,17 +191,16 @@ function parsePicklist(raw, fmt = raw) {
   const isHeader = s => /^(bezeichnung|artikel|charge|lot|menge|best|einheit|anzahl|gewicht|produktion|logistik)/.test(normH(s)) || BA_HEAD.test(normH(s));
 
   const lines = [];
-  let cur = null, curRow = -1;
+  let cur = null;
   const baText = (i, j) => { const t = text(i, j); return t && !isHeader(t) ? t : ''; };
   for (let i = h + 1; i < raw.length; i++) {
     const a = text(i, colArt);
     if (isArticle(a)) {
       cur = { artikel: a, bez: colBez >= 0 && colBez !== colArt ? text(i, colBez) : '', charge: text(i, colCharge), hinweis: '',
-        ba: baText(i, colBA), kunde: baText(i, colKunde), ...(qty(i) || { required: 0, einheit: 'Stück' }), picked: 0, scans: [] };
-      lines.push(cur); curRow = i;
+        ba: baText(i, colBA), ...(qty(i) || { required: 0, einheit: 'Stück' }), picked: 0, scans: [] };
+      lines.push(cur);
       continue;
     }
-    if (cur && i === curRow + 1 && colKunde < 0 && !cur.kunde) cur.kunde = baText(i, colBA); // zweite Zeile: Kunde
     if (cur && a && !isHeader(a) && !cur.bez) {
       cur.bez = a; // zweite Zeile eines Artikels: Bezeichnung, daneben evtl. Hinweis
       const note = text(i, colCharge);
@@ -266,6 +264,47 @@ function skewAngle(rgba, W, H, maxDeg = 12) {
   for (let d = -maxDeg; d <= maxDeg; d += 0.5) { const s = score(d); if (s > bestS) { best = d; bestS = s; } }
   for (let d = best - 0.4; d <= best + 0.4; d += 0.1) { const s = score(d); if (s > bestS) { best = d; bestS = s; } }
   return Math.round(best * 10) / 10;
+}
+
+// Barcode-Balken vor der Texterkennung entfernen (Lagerplatz-Etikett: Barcode, darunter "H3.01.01.00.01"). Tesseract
+// hält die Balken für Text und liest dann gar nichts -- ohne Balken kommt die Nummer mit ~90 % (Foto 25.09.2026).
+// Balken = senkrechte Tintenläufe, deutlich länger als jeder Ziffernstrich: Grenze ist 60 % der längsten Läufe im Bild
+// (95. Perzentil), damit es für die Nahaufnahme eines Etiketts genauso passt wie für ein ganzes Blatt.
+// Ohne Barcode im Bild sind die längsten Läufe die Ziffern selbst -- deshalb nur als zweiter Versuch einsetzen.
+// rgba: ImageData.data, Ergebnis: neues RGBA-Bild, Schrift schwarz auf weiß, Balken weiß.
+function stripBars(rgba, W, H) {
+  const ink = inkMask(rgba, W, H), runs = [], min = Math.max(4, Math.round(H * 0.01));
+  const colRuns = x => {
+    const out = [];
+    for (let y = 0; y < H; y++) {
+      if (!ink[y * W + x]) continue;
+      let e = y;
+      while (e + 1 < H && (ink[(e + 1) * W + x] || (e + 2 < H && ink[(e + 2) * W + x]))) e++; // 1 Pixel Lücke überbrücken
+      if (e - y + 1 >= min) out.push([y, e]);
+      y = e;
+    }
+    return out;
+  };
+  const perCol = [];
+  for (let x = 0; x < W; x++) { const r = colRuns(x); perCol.push(r); for (const [a, b] of r) runs.push(b - a + 1); }
+  const out = new Uint8ClampedArray(W * H * 4);
+  for (let p = 0; p < W * H; p++) { const v = ink[p] ? 0 : 255; out.set([v, v, v, 255], p * 4); }
+  if (runs.length < 20) return out;
+  runs.sort((a, b) => a - b);
+  const lim = 0.6 * runs[Math.floor(runs.length * 0.95)];
+  for (let x = 0; x < W; x++) for (const [a, b] of perCol[x]) if (b - a + 1 >= lim)
+    for (let y = Math.max(0, a - 2); y <= Math.min(H - 1, b + 2); y++) out.set([255, 255, 255, 255], (y * W + x) * 4);
+  return out;
+}
+
+// Lagerplatz: Halle + Nummer, dann vier Zweiergruppen -- "H3.01.01.00.01" (fortlaufend ab H1). Aus Barcode oder Text;
+// die Texterkennung liest Punkte auch als Komma/Doppelpunkt und 0 als O -- das wird hier geradegezogen.
+const LAGERPLATZ = /^[A-Z]\d{1,3}(\.\d{2}){4}$/;
+function findLagerplatz(text) {
+  // nur hinter Ziffer/Punkt umdeuten -- der Hallen-Buchstabe vorne bleibt, wie er ist
+  const t = String(text ?? '').toUpperCase().replace(/(?<=[\d.,:]\s?)O/g, '0').replace(/(?<=[\d.,:]\s?)[IL|]/g, '1');
+  const m = t.match(/[A-Z]\s?\d{1,3}(?:\s?[.,:;·]\s?\d{2}){4}/g) || [];
+  return [...new Set(m.map(s => s.replace(/\s/g, '').replace(/[,:;·]/g, '.')))].filter(s => LAGERPLATZ.test(s));
 }
 
 // Tabellenlinien vor der Texterkennung entfernen: die dicken Rasterlinien der Druck-Pickliste hält Tesseract
@@ -445,8 +484,12 @@ function picklistGridFromWords(ocrLines, width) {
   const firstY = recs.length ? recs[0].y : Infinity;
   const heads = frags.filter(f => f.col !== artCol && colHead(f) && f.y < firstY);
   const groups = new Map();
-  // Werte erst ab der ersten Artikelzeile: darüber stehen noch Kopfzeilen anderer Spalten ("BA-Nr. / Kunde", "best.")
-  const valFrom = recs.length ? firstY - 0.8 * (artHead?.h || recs[0].h || 0) : headY;
+  // Werte erst unterhalb der Kopfzeilen ("BA-Nr. / Kunde", "Artikelnummer / Bezeichnung", "Menge / best."). Grenze ist
+  // die unterste Kopfzeile, nicht die Artikelzeile: Die BA-Nr. in der ersten Spalte steht oft oben in ihrer zweizeiligen
+  // Zelle, gut eine Zeile höher als die Artikelnummer daneben (Foto 11.09.2026, BA-Nr. 29711) -- sonst ging sie verloren.
+  const hh = artHead?.h || recs[0]?.h || 0;
+  const headBottom = Math.max(-Infinity, ...frags.filter(f => anyHead(f) && f.y < firstY).map(f => f.y));
+  const valFrom = recs.length ? Math.max(headBottom + 0.25 * hh, firstY - 2.5 * hh) : headY;
   const valTo = recs.length ? recs.at(-1).y + reach(recs.at(-1)) : Infinity;
   for (const f of frags) {
     if (f.col === artCol || f.y <= headY || f.y < valFrom || f.y > valTo || anyHead(f)) continue;
@@ -483,7 +526,7 @@ function picklistGridFromWords(ocrLines, width) {
         if (main[k]) add(second, k, f.text); else main[k] = f.text;
       }
     }
-    // "BA-Nr." oder "Kunde" (zweizeiliger Kopf derselben Spalte): immer unter einem Namen, BA-Nr. oben, Kunde darunter
+    // "BA-Nr." oder "Kunde" (zweizeiliger Kopf derselben Spalte, dasselbe): immer unter einem Namen
     const name = head ? (BA_HEAD.test(normH(head.text)) ? 'BA-Nr.' : head.text) : '';
     cols.push({ name, main, second, qtyLike: vals.filter(f => /^\d+([.,]\d+)?\s*(kg|stk|stück)?\.?$/i.test(f.text)).length });
   }
@@ -531,4 +574,4 @@ function applyPicklist(r, codes, lines) {
   return out;
 }
 
-if (typeof module !== 'undefined') module.exports = { parseDe, cleanLine, parseLabel, parsePicklist, applyPicklist, picklistGridFromWords, stripTableLines, skewAngle, verticalTextScore, gebindeCount, normArt, normCharge, requiredLabelColor, classifyLabelColor };
+if (typeof module !== 'undefined') module.exports = { parseDe, stripBars, findLagerplatz, LAGERPLATZ, cleanLine, parseLabel, parsePicklist, applyPicklist, picklistGridFromWords, stripTableLines, skewAngle, verticalTextScore, gebindeCount, normArt, normCharge, requiredLabelColor, classifyLabelColor };

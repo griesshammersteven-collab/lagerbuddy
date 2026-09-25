@@ -3,7 +3,7 @@
 -- Lager-Code: gibt man einmal pro Handy ein, gilt für alle Picker. Teamleiter-Passwörter: bei jeder Anmeldung.
 -- Groß-/Kleinschreibung, Leerzeichen und Bindestriche spielen bei der Eingabe keine Rolle.
 -- Code ändern = diese Datei mit neuem Wert nochmal ausführen; Handys fragen dann beim nächsten Abgleich neu.
--- Weiterer Teamleiter: Zeile im insert ergänzen UND das Kürzel in app.js bei MASTERS eintragen.
+-- Weitere Teamleiter und Picker legt der Hauptadmin (CMue) direkt in der App an: Team verwalten (Personen-Symbol oben).
 do $$
 declare
   lager text := 'HIER-LAGER-CODE';
