@@ -84,7 +84,7 @@ async function tmSpeichern(ev) {
   if (!ROLLEN[p.rolle]) { tmFehler('Bitte eine Rolle wählen.'); return; }
   if (!p.bereiche.length) { tmFehler('Mindestens einen Bereich wählen.'); return; }
   if (alt && alt.rolle !== 'picker' && p.rolle === 'picker'
-      && !confirm(`${p.kuerzel} wird Picker. Das Passwort von ${p.kuerzel} gilt dann nicht mehr. Fortfahren?`)) return;
+      && !confirm(`${p.kuerzel} wird Picker. Das Passwort von ${p.kuerzel} gilt dann nicht mehr.\n\nOK = speichern`)) return;
   if (!SYNC_ON) { // ohne Server: nur auf diesem Handy, Passwort wie beim Anmelden Kürzel + "4567"
     team = alt ? team.map(x => x === alt ? p : x) : [...team, p];
     teamSpeichern(); teamGeaendert();
@@ -97,11 +97,11 @@ async function tmSpeichern(ev) {
     const res = await rpc('lb_person_speichern', { lager, admin_kuerzel: tlAuth?.kuerzel ?? null, admin_pw: tlAuth?.pw ?? null, person: p });
     await ladeTeam(true);
     if (res?.startpasswort) zeigePasswort(res.kuerzel, res.startpasswort,
-      `Nur jetzt sichtbar – bitte an ${res.kuerzel} weitergeben. Bei der ersten Anmeldung muss ${res.kuerzel} ein eigenes Passwort wählen.`);
+      `Nur jetzt sichtbar. Bitte an ${res.kuerzel} weitergeben. Bei der ersten Anmeldung muss ${res.kuerzel} ein eigenes Passwort wählen.`);
     else { toast(`${res?.kuerzel || p.kuerzel} gespeichert.`); tmSchliessen(); }
   } catch (err) {
     if (err.kind === 'zugang') lagerUngueltig();
-    else tmFehler(err.kind === 'server' ? 'Keine Verbindung zum Server. Das Team verwalten geht nur mit Netz.' : err.message);
+    else tmFehler(err.kind === 'server' ? 'Keine Verbindung zum Server. Bitte Internet prüfen und noch einmal speichern.' : err.message);
   } finally { $('tmSave').disabled = false; }
 }
 
@@ -113,10 +113,10 @@ async function tmZuruecksetzen() {
   try {
     const res = await rpc('lb_passwort_zuruecksetzen', { lager, admin_kuerzel: tlAuth?.kuerzel ?? null, admin_pw: tlAuth?.pw ?? null, kuerzel: p.kuerzel });
     zeigePasswort(p.kuerzel, res.passwort,
-      `Nur jetzt sichtbar – bitte an ${p.kuerzel} weitergeben. Bei der nächsten Anmeldung muss ${p.kuerzel} ein eigenes Passwort wählen.`);
+      `Nur jetzt sichtbar. Bitte an ${p.kuerzel} weitergeben. Bei der nächsten Anmeldung muss ${p.kuerzel} ein eigenes Passwort wählen.`);
   } catch (err) {
     if (err.kind === 'zugang') lagerUngueltig();
-    else tmFehler(err.kind === 'server' ? 'Keine Verbindung zum Server.' : err.message);
+    else tmFehler(err.kind === 'server' ? 'Keine Verbindung zum Server. Bitte Internet prüfen und noch einmal versuchen.' : err.message);
   } finally { $('tmReset').disabled = false; }
 }
 
@@ -137,5 +137,5 @@ for (const r of document.querySelectorAll('input[name=tmRolle]')) r.onchange = t
 $('tmPwOk').onclick = () => { $('tmPwBox').hidden = true; $('tmPwCode').textContent = ''; renderTeam(); };
 $('tmPwCopy').onclick = async () => {
   try { await navigator.clipboard.writeText($('tmPwCode').textContent); toast('Passwort kopiert.'); }
-  catch { toast('Kopieren ging nicht – bitte abschreiben.'); }
+  catch { toast('Kopieren ging nicht. Bitte abschreiben.'); }
 };

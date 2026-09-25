@@ -54,7 +54,7 @@ function load() {
 }
 function save() {
   try { localStorage.setItem(KEY, JSON.stringify(list)); return true; }
-  catch { toast('Speichern fehlgeschlagen. Ist der Speicher voll?'); return false; }
+  catch { toast('Nicht gespeichert: Der Speicher des Handys ist voll. Bitte Teamleiter informieren.'); return false; }
 }
 /* ---------- Abgleich der Picklisten zwischen den Handys ----------
    sync.base: letzter bekannter Serverstand je Liste { doc, rev, geloescht }
@@ -82,7 +82,7 @@ function saveSync() {
     localStorage.setItem(KEY_SYNC, JSON.stringify(sync));
     localStorage.removeItem(KEY_PICKS); localStorage.removeItem(KEY_PICK); // erst nach erfolgreichem Speichern im neuen Format
     return true;
-  } catch { toast('Speichern fehlgeschlagen. Ist der Speicher voll?'); return false; }
+  } catch { toast('Nicht gespeichert: Der Speicher des Handys ist voll. Bitte Teamleiter informieren.'); return false; }
 }
 function foldLocal() { // ohne Server: Änderungen sofort in den eigenen Stand übernehmen
   for (const { id, op } of sync.pending) {
@@ -184,15 +184,15 @@ async function pushNow() {
         const tlOps = err.kind === 'teamleiter' ? batch.filter(p => TL_OPS.includes(p.op.t)) : [];
         if (tlOps.length && tlOps.length < batch.length) {
           sync.pending = sync.pending.filter(p => !tlOps.includes(p));
-          toast('Teamleiter-Änderung verworfen (nicht mehr als Teamleiter angemeldet). Buchungen werden übertragen.');
+          toast('Teamleiter-Änderung nicht gespeichert: Sie sind nicht mehr als Teamleiter angemeldet. Buchungen werden weiter übertragen.');
           saveSync(); changed = true;
           continue;
         }
-        toast('Vom Server abgelehnt: ' + err.message); // nicht endlos wiederholen, Änderung verfällt
+        toast('Der Server hat die Änderung abgelehnt: ' + err.message); // nicht endlos wiederholen, Änderung verfällt
         res = { ok: true };
       }
       // Kaputter Stand auf dem Server (am Server vorbei geschrieben): nicht übernehmen und nicht endlos neu versuchen
-      if (res?.row && !res.row.geloescht && !gueltig(res.row.doc)) { toast('Pickliste auf dem Server beschädigt – Änderung verworfen.'); res = { ok: true }; }
+      if (res?.row && !res.row.geloescht && !gueltig(res.row.doc)) { toast('Pickliste auf dem Server ist beschädigt. Ihre Änderung wurde nicht gespeichert. Bitte Teamleiter informieren.'); res = { ok: true }; }
       // Antwort kann nach einem parallelen Abgleich eintreffen, der schon Neueres geholt hat: nicht zurückdrehen
       if (res?.row && res.row.rev >= (sync.base[id]?.rev || 0)) sync.base[id] = fromRow(res.row);
       if (!res || res.ok) sync.pending = sync.pending.filter(p => !batch.includes(p));
@@ -255,8 +255,8 @@ function renderSyncState() {
   if (!SYNC_ON) return;
   const n = sync.pending.length + (typeof bew === 'undefined' ? 0 : bew.offen.length), warten = n === 1 ? '1 Änderung wartet' : `${n} Änderungen warten`;
   el.className = 'sync-state' + (syncErr || n ? ' warn' : '');
-  el.textContent = syncErr === 'offline' ? `Offline – ${n ? warten + ' auf Netz' : 'zeigt den letzten Stand'}`
-    : syncErr === 'zugang' ? 'Lager-Code ungültig – bitte neu anmelden'
+  el.textContent = syncErr === 'offline' ? `Offline: ${n ? warten + ' auf Internet' : 'zeigt den letzten Stand'}`
+    : syncErr === 'zugang' ? 'Lager-Code ungültig. Bitte neu anmelden.'
     : n ? `Wird übertragen … (${warten})` : '✓ Mit allen Handys abgeglichen';
 }
 
@@ -399,10 +399,10 @@ function renderPick() {
   const cur = currentPickLine();
   const fehlen = missing === 1 ? '1 Position fehlt' : `${missing} Positionen fehlen`;
   $('pickBanner').className = 'card pick-banner' + (complete ? ' done' : '');
-  $('pickBanner').textContent = missing === 0 ? '✓ Pickliste vollständig – Aufgabe erledigt'
-    : pick.freigabe ? `✓ Pickliste abgeschlossen – freigegeben von ${pick.freigabe.von}, ${fehlen}`
-    : needsFreigabe ? `Übersprungen: ${fehlen} – Freigabe durch Teamleiter (CMue oder MD) nötig`
-    : `${done} von ${total} Artikeln fertig`;
+  $('pickBanner').textContent = missing === 0 ? '✓ Pickliste vollständig. Aufgabe erledigt.'
+    : pick.freigabe ? `✓ Pickliste abgeschlossen: freigegeben von ${pick.freigabe.von}, ${fehlen}`
+    : needsFreigabe ? `Übersprungen: ${fehlen}. Ein Teamleiter muss freigeben.`
+    : `${done} von ${total} Positionen fertig`;
   $('pickApprove').hidden = !(needsFreigabe && role === 'master');
   $('pickExport').hidden = !(role === 'master' && pickDone(pick)); // fertige Liste: Teamleiter lädt das Ergebnis herunter
   $('pickName').textContent = pick.name + (pick.fuer ? ' · für ' + pick.fuer : '');
@@ -415,7 +415,7 @@ function renderPick() {
     li.className = 'card pick-line' + (isDone ? ' done' : l === cur ? ' current' : ' waiting') + (!isDone && l.skipped ? ' skipped' : '');
     if (l === cur) {
       const now = document.createElement('div'); now.className = 'pick-now';
-      now.textContent = l.skipped ? `Übersprungen · Position ${i + 1} – nachholen oder vom Teamleiter freigeben lassen` : `Jetzt buchen · Position ${i + 1} von ${total}`;
+      now.textContent = l.skipped ? `Übersprungen · Position ${i + 1}: nachholen oder vom Teamleiter freigeben lassen` : `Jetzt buchen · Position ${i + 1} von ${total}`;
       li.append(now);
     }
     const head = document.createElement('div'); head.className = 'nums';
@@ -423,7 +423,7 @@ function renderPick() {
     const prog = document.createElement('div'); prog.className = 'sub';
     const geb = gebindeCount(l.required, l.gebinde);
     prog.textContent = (l.charge ? `Charge ${l.charge} · ` : '') + `${fmtN(l.picked)} / ${fmtN(l.required)} ${l.einheit}` +
-      (geb ? ` · ≈ ${fmtN(geb)} Gebinde à ${fmtN(l.gebinde)} ${l.einheit}` : '');
+      (geb ? ` · ca. ${fmtN(geb)}\u00a0Gebinde je ${fmtN(l.gebinde)}\u00a0${l.einheit}` : '');
     const zahl = x => x.anzahl || 1, aus = l.scans.filter(x => x.richtung !== 'ein'), auto = aus.filter(x => !x.manuell);
     const nScan = auto.reduce((s, x) => s + zahl(x), 0), nHand = aus.filter(x => x.manuell).reduce((s, x) => s + zahl(x), 0);
     const nEin = l.scans.filter(x => x.richtung === 'ein').reduce((s, x) => s + zahl(x), 0);
@@ -431,7 +431,7 @@ function renderPick() {
     const count = document.createElement('div'); count.className = 'sub pick-count';
     count.textContent = (geb ? `Gebinde gescannt: ${nScan} von ${fmtN(geb)}` : `Gebinde gescannt: ${nScan}`) +
       (nBest ? ` · davon ${nBest} per Sammelbuchung (${[...new Set(sammel.map(x => x.picker || '–'))].join(', ')})` : '') +
-      (nHand ? ` · ${nHand}× von Hand (Teamleiter)` : '') + (nEin ? ` · eingelagert: ${nEin}` : '');
+      (nHand ? ` · ${nHand}× von Hand (Teamleiter)` : '') + (nEin ? ` · eingebucht: ${nEin}` : '');
     li.append(head, prog, count);
     if (l.hinweis) { const n = document.createElement('div'); n.className = 'sub pick-note'; n.textContent = l.hinweis; li.append(n); }
     li.append(baBlock(l, i, l === cur && !isDone));
@@ -516,7 +516,7 @@ function baBlock(l, i, istDran) {
     }
   } else {
     const t = document.createElement('div'); t.className = 'pick-ba-text';
-    t.textContent = `BA-Nr. ${l.ba || '–'}`;
+    t.textContent = `BA-Nr.: ${l.ba || 'noch leer'}`;
     box.append(t);
   }
   return box;
@@ -533,9 +533,8 @@ function setBaFeld(l, key, raw) {
 // Vor dem ersten Gebinde einer Position: BA-Nr. bestätigen lassen (OK = geprüft, auf das eigene Kürzel)
 function baBestaetigen(l) {
   if (l.baOk) return true;
-  if (!confirm(`Erst die BA-Nr. (Kunde) prüfen (Position ${pick.lines.indexOf(l) + 1}, ${l.artikel}):\n\n` +
-    `BA-Nr.: ${l.ba || '– leer –'}\n\n` +
-    `Stimmt das mit dem Auftrag überein? OK = geprüft (${picker}). Abbrechen = erst bei der Position korrigieren.`)) return false;
+  if (!confirm(`BA-Nr. (Kunde) prüfen\nPosition ${pick.lines.indexOf(l) + 1} · ${l.artikel}\nBA-Nr.: ${l.ba || '(leer)'}\n\n` +
+    `Stimmt sie mit dem Auftrag überein?\nOK = ja, geprüft (${picker})\nAbbrechen = erst bei der Position korrigieren`)) return false;
   return baGeprueft(l);
 }
 
@@ -556,7 +555,7 @@ function skipPick(l, i) {
   renderPick();
 }
 function setPickField(l, key, raw) {
-  if (role !== 'master') { toast('Nur CMue oder MD können Positionen ändern.'); renderPick(); return; }
+  if (role !== 'master') { toast('Nur Teamleiter können Positionen ändern.'); renderPick(); return; }
   let v = raw.trim().replace(/\s+/g, ' ');
   if (key === 'artikel') {
     v = v.replace(/\s+/g, '');
@@ -570,10 +569,11 @@ function setPickField(l, key, raw) {
   renderPick();
 }
 $('pickApprove').onclick = () => {
-  if (role !== 'master') { toast('Nur CMue oder MD können freigeben.'); return; }
+  if (role !== 'master') { toast('Nur Teamleiter können freigeben.'); return; }
   const open = pick.lines.filter(l => l.picked < l.required);
   if (!confirm(`Pickliste freigeben, obwohl ${open.length === 1 ? '1 Position fehlt' : open.length + ' Positionen fehlen'}?\n` +
-    open.map(l => `${l.artikel}${l.charge ? ' · Charge ' + l.charge : ''}: ${fmtN(l.picked)} / ${fmtN(l.required)} ${l.einheit}`).join('\n'))) return;
+    open.map(l => `${l.artikel}${l.charge ? ' · Charge ' + l.charge : ''}: ${fmtN(l.picked)} / ${fmtN(l.required)} ${l.einheit}`).join('\n') +
+    '\n\nDie Pickliste wird damit abgeschlossen.')) return;
   commit(pick.id, { t: 'freigabe', freigabe: { von: picker, ts: Date.now() } });
   renderPick();
 };
@@ -592,7 +592,7 @@ function addPick(e) {
   if (line.charge && normCharge(line.charge) !== normCharge(e.charge)) {
     // gleicher Artikel, aber die Charge einer späteren Position -> nicht vorziehen
     if (lines.some(l => l !== line && sameArt(l) && l.charge && normCharge(l.charge) === normCharge(e.charge))) { toast(nochmal); return; }
-    if (!confirm(`Falsche Charge? Erwartet ${line.charge}, erfasst ${e.charge || '–'}. Trotzdem buchen?`)) return;
+    if (!confirm(`Charge passt nicht zur Position.\nErwartet: ${line.charge}\nErfasst: ${e.charge || '(leer)'}\n\nOK = trotzdem buchen\nAbbrechen = nicht buchen`)) return;
   }
   if (line.einheit !== e.einheit) { toast(`Falsche Einheit: für diesen Artikel wird ${line.einheit} erwartet.`); return; }
   if (!baBestaetigen(line)) return;
@@ -601,7 +601,7 @@ function addPick(e) {
   const scanned = formScan, manuell = !scanned?.code;
   if (role !== 'master') {
     if (!scanned) { toast('In der Pickliste wird jedes Gebinde gescannt: bitte das Etikett fotografieren.'); return; }
-    if (!scanned.code) { toast('Artikel-Barcode nicht erkannt. Bitte das Etikett nochmal scharf fotografieren – ohne Barcode bucht nur der Teamleiter von Hand.'); return; }
+    if (!scanned.code) { toast('Barcode nicht erkannt. Etikett noch einmal scharf fotografieren. Geht es nicht, bucht der Teamleiter von Hand.'); return; }
     if (line.gebinde && e.menge > line.gebinde + 0.001) {
       toast(`Ein Scan ist ein Gebinde: höchstens ${fmtN(line.gebinde)} ${line.einheit}. Weitere Gebinde einzeln scannen.`); return;
     }
@@ -623,7 +623,7 @@ function addPick(e) {
       toast(`Offen sind nur noch ${fmtN(offen)} ${line.einheit}: höchstens ${Math.floor((offen + 0.001) / e.menge)} Gebinde.`); return;
     }
     const summe = Math.round(anzahl * e.menge * 1000) / 1000;
-    if (!confirm(`${anzahl} gleiche Gebinde à ${fmtN(e.menge)} ${e.einheit} = ${fmtN(summe)} ${e.einheit} als gepickt bestätigen?\n\n` +
+    if (!confirm(`${anzahl} gleiche Gebinde je ${fmtN(e.menge)} ${e.einheit} = ${fmtN(summe)} ${e.einheit} als gepickt bestätigen?\n\n` +
       `Gebucht auf ${picker}. Mit OK bestätigen Sie, alle ${anzahl} Gebinde geprüft zu haben (Artikel, Charge, Menge).`)) return;
   }
   // Gebindegröße bekannt und Menge weicht ab -> Anbruch oder vertippt: einmal nachfragen statt stillschweigend buchen.
@@ -633,8 +633,8 @@ function addPick(e) {
   const istRest = !!line.gebinde && e.menge < geb && Math.abs(e.menge - rest) < 0.001;
   if (geb && Math.abs(e.menge - geb) > 0.001 && !istRest &&
       !confirm((e.menge < geb
-        ? `Anbruch buchen? Ein volles Gebinde hat ${fmtN(geb)} ${line.einheit}, gebucht werden ${fmtN(e.menge)} ${e.einheit}.`
-        : `Mehr als ein Gebinde? Ein Gebinde hat ${fmtN(geb)} ${line.einheit}, erfasst wurden ${fmtN(e.menge)} ${e.einheit}. Trotzdem buchen?`) +
+        ? `Weniger als ein volles Gebinde (Anbruch).\nVolles Gebinde: ${fmtN(geb)} ${line.einheit}\nErfasst: ${fmtN(e.menge)} ${e.einheit}\n\nOK = so buchen\nAbbrechen = Menge ändern`
+        : `Mehr als ein volles Gebinde.\nVolles Gebinde: ${fmtN(geb)} ${line.einheit}\nErfasst: ${fmtN(e.menge)} ${e.einheit}\n\nOK = trotzdem buchen\nAbbrechen = Menge ändern`) +
         (korrigieren ? '\n\n' + korrigieren.trim() : ''))) return;
   const scan = { ts: e.ts, menge: e.menge, charge: e.charge, picker: e.picker, ...(anzahl > 1 ? { anzahl } : {}),
     ...(scanned ? { fp: scanned.fp } : {}), ...(manuell ? { manuell: true } : {}), lagerplatz: lp, richtung: 'aus' };
@@ -663,11 +663,11 @@ function applyParsedPicklist({ title, von, nach, lines, skipped }, sourceName, t
   if (!replace) $('pickFuer').value = ''; // nächste Liste bewusst neu zuteilen statt aus Versehen demselben Picker
   const p = picks.find(x => x.id === id);
   openPick(p);
-  toast(`Pickliste geladen: ${lines.length} Artikel` + (role === 'master' && p.fuer ? ` für ${p.fuer}.` : '.') + (skipped ? ` ${skipped} Zeile(n) ohne Menge übersprungen.` : '') + (hinweis || ''));
+  toast(`Pickliste geladen: ${lines.length === 1 ? '1 Position' : lines.length + ' Positionen'}` + (role === 'master' && p.fuer ? ` für ${p.fuer}.` : '.') + (skipped ? ` ${skipped === 1 ? '1 Zeile' : skipped + ' Zeilen'} ohne Menge übersprungen.` : '') + (hinweis || ''));
 }
 async function loadPicklistFile(file, target) {
   if (!file) return;
-  if (role !== 'master') { toast('Nur CMue oder MD können eine Pickliste laden.'); return; } // Knöpfe sind zwar schon versteckt, hier zusätzlich abgesichert
+  if (role !== 'master') { toast('Nur Teamleiter können eine Pickliste aus Excel laden.'); return; } // Knöpfe sind zwar schon versteckt, hier zusätzlich abgesichert
   try {
     await loadScript('xlsx.mini.min.js');
     const buf = await file.arrayBuffer();
@@ -711,7 +711,7 @@ async function loadPicklistPhoto(file, target) {
     let parsed = null, fehler = null;
     try {
       for (const q of versuche) {
-        if (q) setBusy(true, q === 2 ? 'Pickliste steht kopf – wird gedreht …' : 'Pickliste liegt quer – wird gedreht …');
+        if (q) setBusy(true, q === 2 ? 'Pickliste steht kopf. Sie wird gedreht …' : 'Pickliste liegt quer. Sie wird gedreht …');
         const cv = q ? rotateQuarter(canvas, q) : canvas;
         try {
           const r = await withTimeout(worker.recognize(cv, { rotateAuto: true }), 120000, 'Texterkennung hat zu lange gedauert');
@@ -724,7 +724,7 @@ async function loadPicklistPhoto(file, target) {
     } finally { await worker.setParameters({ tessedit_pageseg_mode: '3' }); } // Etiketten lesen weiter mit Seitenlayout
     if (!parsed) throw fehler || pickErr('Keine Pickliste im Foto erkannt. Bitte die ganze Tabelle scharf und bei gutem Licht fotografieren.');
     applyParsedPicklist(parsed, file.name, target,
-      ' Bitte die Zeilen unten prüfen – von einem Foto liest die App nicht so zuverlässig wie aus Excel.');
+      ' Bitte jede Zeile unten prüfen: Fotos liest die App nicht so sicher wie Excel.');
   } catch (err) {
     if (!err?.userMessage) console.error(err);
     toast(err?.userMessage || (err instanceof Error && err.message.length < 120) ? err.message : 'Foto konnte nicht gelesen werden.');
@@ -799,8 +799,8 @@ $('pickFuerEdit').onchange = () => {
 };
 $('pickBack').onclick = () => openPick(null);
 $('pickClear').onclick = () => {
-  if (role !== 'master') { toast('Nur CMue oder MD können die Pickliste verwerfen.'); return; }
-  if (!pick || !confirm('Pickliste verwerfen? Der Fortschritt geht verloren.')) return;
+  if (role !== 'master') { toast('Nur Teamleiter können die Pickliste verwerfen.'); return; }
+  if (!pick || !confirm('Pickliste verwerfen? Sie verschwindet auf allen Handys, der Fortschritt geht verloren.')) return;
   if (commit(pick.id, { t: 'weg' })) openPick(null);
 };
 
@@ -967,7 +967,7 @@ $('form').onsubmit = ev => {
   if (idx === null && mode === 'lager') { lagerBuchen(e); return; }
   if (!e.charge && !confirm(idx !== null ? 'Die Charge ist leer. Trotzdem speichern?' : 'Die Charge ist leer. Trotzdem hinzufügen?')) return;
   if (list.some((x, j) => j !== idx && x.artikel === e.artikel && x.charge === e.charge) &&
-      !confirm('Artikel und Charge sind schon in der Liste. Trotzdem nochmal hinzufügen?')) return;
+      !confirm('Artikel und Charge sind schon in der Liste. Trotzdem noch einmal hinzufügen?')) return;
   if (idx !== null) {
     const old = list[idx];
     // Erfassungszeit, erkannte Etikettfarbe und ursprünglicher Erfasser bleiben; wer geändert hat, wird zusätzlich vermerkt
@@ -1113,10 +1113,10 @@ function renderLabelCheck() {
   const up = s.need?.toUpperCase();
   el.textContent = {
     none: '',
-    info: `Etikett muss ${up} sein – bitte prüfen.`,
-    unsure: `Etikettfarbe nicht sicher erkannt – muss ${up} sein, bitte prüfen.`,
-    ok: `✓ Etikett ${s.need} – passt.`,
-    bad: `Achtung: Dieser Artikel braucht ein ${LABEL_ADJ[s.need]?.toUpperCase()} Etikett – erkannt: ${s.got}.`,
+    info: `Etikett muss ${up} sein. Bitte prüfen.`,
+    unsure: `Etikettfarbe nicht sicher erkannt. Sie muss ${up} sein, bitte prüfen.`,
+    ok: `✓ Etikett ${s.need}: passt.`,
+    bad: `Achtung: Dieser Artikel braucht ein ${LABEL_ADJ[s.need]?.toUpperCase()} Etikett. Erkannt: ${s.got}.`,
   }[s.kind];
 }
 $('artikel').addEventListener('input', renderLabelCheck);
@@ -1139,7 +1139,7 @@ async function scan(file) {
     if (!codes.length) toast('Kein Barcode erkannt. Bitte alle Felder prüfen.');
   } catch (err) {
     console.error(err);
-    toast('Das Foto konnte nicht gelesen werden. Bitte nochmal versuchen.');
+    toast('Das Foto konnte nicht gelesen werden. Bitte noch einmal versuchen.');
   } finally {
     setBusy(false);
     if (canvas) { canvas.width = 0; canvas.height = 0; } // iOS begrenzt den Canvas-Speicher, sonst schlagen spätere Scans fehl
@@ -1188,7 +1188,7 @@ $('export').onclick = async () => {
     XLSX.utils.book_append_sheet(wb, textSheet(rows, [16, 34, 34, 14, 10, 8, 16, 20, 16]), 'Erfassung');
     await saveWorkbook(wb, `LagerBuddy_${stamp()}.xlsx`);
   } catch (err) {
-    console.error(err); toast('Export fehlgeschlagen. Bitte nochmal versuchen.');
+    console.error(err); toast('Export fehlgeschlagen. Bitte noch einmal versuchen.');
   }
 };
 
@@ -1234,12 +1234,12 @@ async function exportPick(p) {
       .normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^A-Za-z0-9-]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 60);
     await saveWorkbook(wb, `${slug(titel) || 'Pickliste'}${p.fuer && slug(p.fuer) ? '_' + slug(p.fuer) : ''}_${stamp()}.xlsx`);
   } catch (err) {
-    console.error(err); toast('Export fehlgeschlagen. Bitte nochmal versuchen.');
+    console.error(err); toast('Export fehlgeschlagen. Bitte noch einmal versuchen.');
   }
 }
 $('pickExport').onclick = () => pick && exportPick(pick);
 $('clear').onclick = () => {
-  if (!confirm(`Alle ${list.length} Einträge löschen? Vorher herunterladen nicht vergessen.`)) return;
+  if (!confirm(`Alle ${list.length} Einträge löschen? Das lässt sich nicht rückgängig machen. Vorher als Excel herunterladen.`)) return;
   list = []; save(); render();
 };
 
@@ -1365,7 +1365,7 @@ $('lagerForm').onsubmit = async ev => {
     lager = code; $('lagerCode').value = '';
     try { localStorage.setItem(KEY_LAGER, code); } catch {}
     showGate();
-  } catch { toast('Zum Einrichten braucht das Handy einmal Netz.'); }
+  } catch { toast('Keine Verbindung zum Server. Zum Einrichten braucht das Handy einmal Internet.'); }
   finally { $('lagerBtn').disabled = false; }
 };
 
@@ -1445,7 +1445,7 @@ $('tlForm').onsubmit = async ev => {
     login(code, 'master', res);
   } catch (err) {
     if (err.kind === 'zugang') { closeTlForm(); lagerUngueltig(); }
-    else tlFehler('Keine Verbindung zum Server. Die Teamleiter-Anmeldung braucht Netz.');
+    else tlFehler('Keine Verbindung zum Server. Bitte Internet prüfen und noch einmal „Anmelden“ tippen.');
   } finally { $('tlBtn').disabled = false; }
 };
 // Nach Anlegen oder Zurücksetzen durch den Hauptadmin: Startpasswort gilt nur für die erste Anmeldung

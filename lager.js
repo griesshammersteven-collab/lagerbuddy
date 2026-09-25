@@ -20,7 +20,7 @@ function loadBew() {
 let bew = loadBew();
 function saveBew() {
   try { localStorage.setItem(KEY_BEW, JSON.stringify(bew)); return true; }
-  catch { toast('Handyspeicher voll: Lagerbuchung konnte nicht gespeichert werden.'); return false; }
+  catch { toast('Nicht gespeichert: Der Speicher des Handys ist voll. Bitte Teamleiter informieren.'); return false; }
 }
 let bestandServer = null;
 try { const v = JSON.parse(localStorage.getItem(KEY_BESTAND)); if (Array.isArray(v)) bestandServer = v; } catch {}
@@ -76,7 +76,7 @@ async function pushBewegungen() {
         ({ id, ts, lagerplatz, artikel, bez, charge, menge, gebinde, einheit, richtung, quelle, pick_id: pick_id || '', picker })) });
     } catch (err) {
       if (err.kind !== 'daten') throw err;
-      toast('Lagerbuchung vom Server abgelehnt: ' + err.message); // nicht endlos wiederholen
+      toast('Der Server hat die Lagerbuchung abgelehnt: ' + err.message); // nicht endlos wiederholen
     }
     const ids = new Set(teil.map(b => b.id));
     bew.offen = bew.offen.filter(b => !ids.has(b.id));
@@ -101,7 +101,7 @@ function renderLager() {
   if (SYNC_ON) {
     const n = bew.offen.length;
     st.className = 'sync-state' + (syncErr || n ? ' warn' : '');
-    st.textContent = syncErr === 'offline' ? `Offline – ${n ? n + ' Buchung(en) warten auf Netz' : 'zeigt den letzten Stand'}`
+    st.textContent = syncErr === 'offline' ? `Offline: ${n ? (n === 1 ? '1 Buchung wartet' : n + ' Buchungen warten') + ' auf Internet' : 'zeigt den letzten Stand'}`
       : n ? `Wird übertragen … (${n})` : bestandServer ? '✓ Bestand aktuell' : 'Bestand wird geladen …';
   }
   const q = $('bestandSuche').value.trim().toUpperCase();
@@ -118,7 +118,7 @@ function renderLager() {
       const n = document.createElement('div'); n.className = 'nums'; n.textContent = e.artikel + (e.bez ? ' · ' + e.bez : '');
       const s = document.createElement('div'); s.className = 'sub'; s.textContent = e.charge ? 'Charge ' + e.charge : 'ohne Charge';
       links.append(n, s);
-      if (e.menge < 0) { const w = document.createElement('div'); w.className = 'lp-warn'; w.textContent = 'Mehr aus- als eingebucht – Bestand prüfen'; links.append(w); }
+      if (e.menge < 0) { const w = document.createElement('div'); w.className = 'lp-warn'; w.textContent = 'Mehr aus- als eingebucht. Bestand prüfen.'; links.append(w); }
       const rechts = document.createElement('div'); rechts.className = 'lp-menge';
       rechts.textContent = `${fmtN(e.menge)} ${e.einheit}`;
       const g = document.createElement('div'); g.className = 'sub'; g.textContent = `${fmtN(e.gebinde)} Gebinde`;
@@ -153,7 +153,7 @@ function lpWert() {
   const roh = $('lpCode').value.trim();
   if (!roh) { toast('Bitte den Lagerplatz scannen oder eintippen (z. B. H3.01.01.00.01).'); $('lpCode').focus(); return ''; }
   const [lp] = findLagerplatz(roh);
-  if (!lp) { toast(`Lagerplatz „${roh}“ passt nicht zum Schema H3.01.01.00.01.`); $('lpCode').focus(); return ''; }
+  if (!lp) { toast(`„${roh}“ ist kein gültiger Lagerplatz. Richtig ist z. B. H3.01.01.00.01.`); $('lpCode').focus(); return ''; }
   $('lpCode').value = lp;
   return lp;
 }
@@ -182,7 +182,7 @@ async function leseLagerplatz(canvas) {
       try {
         const r = await withTimeout(worker.recognize(b), 60000, 'Texterkennung hat zu lange gedauert');
         const t = r.data.lines.flatMap(l => findLagerplatz(l.text).map(lp => ({ lp, d: mitte((l.bbox.x0 + l.bbox.x1) / 2, (l.bbox.y0 + l.bbox.y1) / 2) })));
-        if (t.length) return { lp: naechster(t), quelle: 'aus Text – bitte prüfen' };
+        if (t.length) return { lp: naechster(t), quelle: 'aus Text, bitte prüfen' };
       } finally { if (b !== canvas) { b.width = 0; b.height = 0; } }
     }
   } finally { await worker.setParameters({ tessedit_pageseg_mode: '3' }); } // Etiketten lesen weiter mit Seitenlayout
@@ -206,9 +206,9 @@ $('lpCam').onchange = async ev => {
     if (r) {
       $('lpCode').value = r.lp;
       $('t-lp').className = 'tag ' + (r.quelle === 'aus Barcode' ? 'ok' : 'check'); $('t-lp').textContent = r.quelle;
-    } else toast('Kein Lagerplatz erkannt. Bitte näher ans Etikett oder die Nummer eintippen.');
+    } else toast('Kein Lagerplatz erkannt. Näher herangehen und neu scannen oder die Nummer eintippen.');
   } catch (err) {
-    console.error(err); toast('Foto konnte nicht gelesen werden. Bitte nochmal versuchen.');
+    console.error(err); toast('Foto konnte nicht gelesen werden. Bitte noch einmal versuchen.');
   } finally {
     setBusy(false);
     if (canvas) { canvas.width = 0; canvas.height = 0; }
@@ -224,11 +224,11 @@ function einPick(e, lp) {
   const line = passend.find(l => !l.charge || normCharge(l.charge) === normCharge(e.charge)) || passend[0];
   if (line.einheit !== e.einheit) { toast(`Falsche Einheit: für diesen Artikel wird ${line.einheit} erwartet.`); return; }
   if (line.charge && normCharge(line.charge) !== normCharge(e.charge) &&
-      !confirm(`Falsche Charge? Erwartet ${line.charge}, erfasst ${e.charge || '–'}. Trotzdem einbuchen?`)) return;
+      !confirm(`Charge passt nicht zur Position.\nErwartet: ${line.charge}\nErfasst: ${e.charge || '(leer)'}\n\nOK = trotzdem einbuchen\nAbbrechen = nicht einbuchen`)) return;
   const scanned = formScan, manuell = !scanned?.code;
   if (role !== 'master') {
     if (!scanned) { toast('In der Pickliste wird jedes Gebinde gescannt: bitte das Etikett fotografieren.'); return; }
-    if (!scanned.code) { toast('Artikel-Barcode nicht erkannt. Bitte das Etikett nochmal scharf fotografieren.'); return; }
+    if (!scanned.code) { toast('Barcode nicht erkannt. Etikett noch einmal scharf fotografieren.'); return; }
   }
   if (scanned && picks.some(p => p.lines.some(l => l.scans.some(x => x.fp === scanned.fp)))) {
     toast('Dieses Foto wurde schon gebucht. Jedes Gebinde einzeln fotografieren.'); return;
@@ -236,8 +236,8 @@ function einPick(e, lp) {
   const anzahl = anzahlWert(), zahl = x => x.anzahl || 1;
   const ausG = line.scans.filter(x => x.richtung !== 'ein').reduce((s, x) => s + zahl(x), 0);
   const einG = line.scans.filter(x => x.richtung === 'ein').reduce((s, x) => s + zahl(x), 0);
-  if (einG + anzahl > ausG && !confirm(`Mehr einbuchen als ausgebucht? Ausgebucht: ${ausG} Gebinde, eingelagert: ${einG}, jetzt: ${anzahl}. Trotzdem einbuchen?`)) return;
-  if (anzahl > 1 && !confirm(`${anzahl} gleiche Gebinde à ${fmtN(e.menge)} ${e.einheit} an ${lp} einbuchen?\n\n` +
+  if (einG + anzahl > ausG && !confirm(`Mehr Gebinde einbuchen, als ausgebucht wurden.\nAusgebucht: ${ausG} · schon eingebucht: ${einG} · jetzt: ${anzahl}\n\nOK = trotzdem einbuchen\nAbbrechen = nicht einbuchen`)) return;
+  if (anzahl > 1 && !confirm(`${anzahl} gleiche Gebinde je ${fmtN(e.menge)} ${e.einheit} an ${lp} einbuchen?\n\n` +
     `Gebucht auf ${picker}. Mit OK bestätigen Sie, alle ${anzahl} Gebinde geprüft zu haben.`)) return;
   const scan = { ts: e.ts, menge: e.menge, charge: e.charge, picker: e.picker, ...(anzahl > 1 ? { anzahl } : {}),
     ...(scanned ? { fp: scanned.fp } : {}), ...(manuell ? { manuell: true } : {}), lagerplatz: lp, richtung: 'ein' };
@@ -245,7 +245,7 @@ function einPick(e, lp) {
   lagerBewegung({ ts: e.ts, lagerplatz: lp, richtung: 'ein', quelle: 'pickliste', pick_id: pick.id, artikel: line.artikel,
     bez: line.bez || e.bez1 || '', charge: e.charge || line.charge || '', menge: e.menge * anzahl, gebinde: anzahl, einheit: line.einheit, picker: e.picker });
   renderPick(); closeForm();
-  toast(`Eingelagert: ${anzahl > 1 ? anzahl + ' × ' : ''}${fmtN(e.menge)} ${e.einheit} ${e.artikel} an ${lp} (${einG + anzahl} von ${ausG} Gebinden)`);
+  toast(`Eingebucht: ${anzahl > 1 ? anzahl + ' × ' : ''}${fmtN(e.menge)} ${e.einheit} ${e.artikel} an ${lp} (${einG + anzahl} von ${ausG} Gebinden)`);
 }
 
 // Modus "Lager": Wareneingang einbuchen oder frei ausbuchen, ohne Pickliste
@@ -254,7 +254,7 @@ function lagerBuchen(e) {
   const richtung = richtungWert(); if (!richtung) return;
   const anzahl = anzahlWert(), rein = richtung === 'ein';
   if (!e.charge && !confirm('Die Charge ist leer. Trotzdem buchen?')) return;
-  if (anzahl > 1 && !confirm(`${anzahl} gleiche Gebinde à ${fmtN(e.menge)} ${e.einheit} ${rein ? 'an' : 'aus'} ${lp} ${rein ? 'einbuchen' : 'ausbuchen'}?\n\n` +
+  if (anzahl > 1 && !confirm(`${anzahl} gleiche Gebinde je ${fmtN(e.menge)} ${e.einheit} ${rein ? 'an' : 'aus'} ${lp} ${rein ? 'einbuchen' : 'ausbuchen'}?\n\n` +
     `Gebucht auf ${picker}. Mit OK bestätigen Sie, alle ${anzahl} Gebinde geprüft zu haben.`)) return;
   const hinweis = lagerBewegung({ ts: e.ts, lagerplatz: lp, richtung, quelle: rein ? 'wareneingang' : 'lager', artikel: e.artikel,
     bez: [e.bez1, e.bez2].filter(Boolean).join(' '), charge: e.charge, menge: e.menge * anzahl, gebinde: anzahl, einheit: e.einheit, picker: e.picker });
@@ -273,7 +273,7 @@ $('bestandExport').onclick = async () => {
     let liste = [];
     if (SYNC_ON) {
       try { liste = await rpc('lb_bewegungen_liste', { lager, anzahl: 10000 }); }
-      catch { toast('Buchungen konnten nicht geladen werden – nur der Bestand wird exportiert.'); }
+      catch { toast('Buchungen konnten nicht geladen werden. Exportiert wird nur der Bestand.'); }
       liste = [...bew.offen.slice().reverse(), ...liste.map(b => ({ ...b, ts: Date.parse(b.ts), menge: Number(b.menge) }))];
     } else liste = bew.alle.slice().reverse();
     const dt = ts => (ts ? new Date(ts).toLocaleString('de-DE') : '');
@@ -289,6 +289,6 @@ $('bestandExport').onclick = async () => {
     XLSX.utils.book_append_sheet(wb, textSheet(b2, [20, 18, 12, 18, 30, 16, 9, 10, 8, 14, 10]), 'Buchungen');
     await saveWorkbook(wb, `Bestand_${stamp()}.xlsx`);
   } catch (err) {
-    console.error(err); toast('Export fehlgeschlagen. Bitte nochmal versuchen.');
+    console.error(err); toast('Export fehlgeschlagen. Bitte noch einmal versuchen.');
   }
 };
