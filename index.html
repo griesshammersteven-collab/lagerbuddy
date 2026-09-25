@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'sha256-PhGRe8GYv2gxrqCfjuJSKnlzDTJmE/Mpm9iRDJSoJJE='; img-src 'self' blob:; connect-src 'self' blob: data: https://*.supabase.co; worker-src 'self' blob:; manifest-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'sha256-fMWxMP2HjLxyar0Raox+0ppQyO4QR0vBmJeNBMl2EkQ='; img-src 'self' blob:; connect-src 'self' blob: data: https://*.supabase.co; worker-src 'self' blob:; manifest-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'">
 <meta name="referrer" content="no-referrer">
 <meta name="theme-color" content="#0B4F82">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -266,6 +266,10 @@ body{overflow-wrap:break-word}
 .tm-rollen .btn,.tm-bereiche .btn{flex:1 1 auto;width:auto;padding:0 10px;position:relative}
 .tm-rollen label:has(input:checked)::before,.tm-bereiche label:has(input:checked)::before{position:absolute;top:4px;left:7px;font-size:13px;line-height:1}
 .pick-line.done .pick-ba-ok{border-color:var(--field)}
+/* Runde 3: Lagerplatz in voller Breite prüfbar, Hinweis im Formular nicht doppelt */
+.lp-row{grid-template-columns:1fr}
+.lp-row .btn{width:100%}
+#toast[aria-hidden="true"]{display:none}
 </style>
 </head>
 <body>
@@ -515,11 +519,11 @@ body{overflow-wrap:break-word}
 </div>
 <div id="toast" role="status" aria-live="polite"></div>
 
-<script src="parse.js?v=2026-09-25.7"></script>
-<script src="picks.js?v=2026-09-25.7"></script>
-<script src="app.js?v=2026-09-25.7"></script>
-<script src="lager.js?v=2026-09-25.7"></script>
-<script src="team.js?v=2026-09-25.7"></script>
-<script src="tour.js?v=2026-09-25.7"></script>
+<script src="parse.js?v=2026-09-25.8"></script>
+<script src="picks.js?v=2026-09-25.8"></script>
+<script src="app.js?v=2026-09-25.8"></script>
+<script src="lager.js?v=2026-09-25.8"></script>
+<script src="team.js?v=2026-09-25.8"></script>
+<script src="tour.js?v=2026-09-25.8"></script>
 </body>
 </html>

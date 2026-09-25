@@ -2,7 +2,7 @@
 /* LagerBuddy: Etikett fotografieren -> Barcodes + Text lokal auf dem Handy lesen -> Liste -> Excel.
    Alle Bibliotheken liegen in vendor/, kein Foto verlässt das Gerät. Nur Picklisten (Positionen, Zuteilung,
    Buchungen) werden über Supabase zwischen den Handys abgeglichen, wenn SYNC unten eingerichtet ist. */
-const APP_VERSION = '2026-09-25.7'; // bei JEDER Veröffentlichung erhöhen, genauso wie ?v= in index.html
+const APP_VERSION = '2026-09-25.8'; // bei JEDER Veröffentlichung erhöhen, genauso wie ?v= in index.html
 // Alte index.html (CDN/Offline-Speicher) mit neuerem app.js-Inhalt: dann fehlen Knöpfe und der Start bricht ab.
 // Einmal frisch laden (eindeutige URL geht am CDN vorbei), bevor irgendetwas verdrahtet wird.
 {
@@ -114,10 +114,10 @@ function commit(id, op) {
 let toastT;
 // Anzeigedauer nach Länge (4 bis 12 s), damit auch lange Hinweise lesbar sind; Antippen schließt.
 // Gleicher Text wie eben: erst leeren, dann setzen, sonst sagen Screenreader ihn kein zweites Mal an.
-function toast(msg) {
+function toast(msg, { form = true } = {}) { // form: false = Meldung aus dem Abgleich, gehört nicht in den Formular-Hinweis
   const t = $('toast');
   // Formular offen: Hinweis zusätzlich über dem Buchen-Knopf stehen lassen (role=alert), bis weiter getippt wird
-  const imForm = !$('form').hidden;
+  const imForm = form && !$('form').hidden;
   if (imForm) { $('formFehler').textContent = msg; $('formFehler').hidden = false; }
   t.setAttribute('aria-hidden', String(imForm)); // sonst doppelt vorgelesen
   if (t.textContent === msg) { t.textContent = ''; requestAnimationFrame(() => { t.textContent = msg; }); } else t.textContent = msg;
@@ -198,15 +198,15 @@ async function pushNow() {
         const tlOps = err.kind === 'teamleiter' ? batch.filter(p => TL_OPS.includes(p.op.t)) : [];
         if (tlOps.length && tlOps.length < batch.length) {
           sync.pending = sync.pending.filter(p => !tlOps.includes(p));
-          toast('Teamleiter-Änderung nicht gespeichert: Sie sind nicht mehr als Teamleiter angemeldet. Buchungen werden weiter übertragen.');
+          toast('Teamleiter-Änderung nicht gespeichert: Sie sind nicht mehr als Teamleiter angemeldet. Buchungen werden weiter übertragen.', { form: false });
           saveSync(); changed = true;
           continue;
         }
-        toast(`Der Server hat die Änderung abgelehnt: ${err.message}. Bitte Teamleiter informieren.`); // nicht endlos wiederholen, Änderung verfällt
+        toast(`Der Server hat die Änderung abgelehnt: ${err.message}. Bitte Teamleiter informieren.`, { form: false }); // nicht endlos wiederholen, Änderung verfällt
         res = { ok: true };
       }
       // Kaputter Stand auf dem Server (am Server vorbei geschrieben): nicht übernehmen und nicht endlos neu versuchen
-      if (res?.row && !res.row.geloescht && !gueltig(res.row.doc)) { toast('Pickliste auf dem Server ist beschädigt. Ihre Änderung wurde nicht gespeichert. Bitte Teamleiter informieren.'); res = { ok: true }; }
+      if (res?.row && !res.row.geloescht && !gueltig(res.row.doc)) { toast('Pickliste auf dem Server ist beschädigt. Ihre Änderung wurde nicht gespeichert. Bitte Teamleiter informieren.', { form: false }); res = { ok: true }; }
       // Antwort kann nach einem parallelen Abgleich eintreffen, der schon Neueres geholt hat: nicht zurückdrehen
       if (res?.row && res.row.rev >= (sync.base[id]?.rev || 0)) sync.base[id] = fromRow(res.row);
       if (!res || res.ok) sync.pending = sync.pending.filter(p => !batch.includes(p));
@@ -243,10 +243,10 @@ async function pull(full) {
   saveSync();
   if (changed) {
     recompute();
-    if (wasOpen && !pick) { openId = null; toast('Diese Pickliste wurde vom Teamleiter verworfen.'); }
-    else if (pick && !sichtbar(pick)) { openId = null; toast(`Diese Pickliste wurde an ${pick.fuer} umgeteilt.`); pick = null; }
+    if (wasOpen && !pick) { openId = null; toast('Diese Pickliste wurde vom Teamleiter verworfen.', { form: false }); }
+    else if (pick && !sichtbar(pick)) { openId = null; toast(`Diese Pickliste wurde an ${pick.fuer} umgeteilt.`, { form: false }); pick = null; }
     const neu = visiblePicks().filter(p => !before.has(p.id) && !pickDone(p) && role !== 'master');
-    if (neu.length && picker) toast(`Neue Pickliste für ${picker}: ${neu[0].name}`);
+    if (neu.length && picker) toast(`Neue Pickliste für ${picker}: ${neu[0].name}`, { form: false });
     renderPickSafe();
   }
   renderSyncState();

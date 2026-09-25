@@ -76,7 +76,7 @@ async function pushBewegungen() {
         ({ id, ts, lagerplatz, artikel, bez, charge, menge, gebinde, einheit, richtung, quelle, pick_id: pick_id || '', picker })) });
     } catch (err) {
       if (err.kind !== 'daten') throw err;
-      toast(`Der Server hat die Lagerbuchung abgelehnt: ${err.message}. Bitte Teamleiter informieren.`); // nicht endlos wiederholen
+      toast(`Der Server hat die Lagerbuchung abgelehnt: ${err.message}. Bitte Teamleiter informieren.`, { form: false }); // nicht endlos wiederholen
     }
     const ids = new Set(teil.map(b => b.id));
     bew.offen = bew.offen.filter(b => !ids.has(b.id));
