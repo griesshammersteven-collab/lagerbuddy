@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'sha256-fMWxMP2HjLxyar0Raox+0ppQyO4QR0vBmJeNBMl2EkQ='; img-src 'self' blob:; connect-src 'self' blob: data: https://*.supabase.co; worker-src 'self' blob:; manifest-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'sha256-QKk+KaobPDFCPp9W5Py+/RaczXKbPYLfkqIl/BYnQ50='; img-src 'self' blob:; connect-src 'self' blob: data: https://*.supabase.co; worker-src 'self' blob:; manifest-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'">
 <meta name="referrer" content="no-referrer">
 <meta name="theme-color" content="#0B4F82">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -258,6 +258,22 @@ h2,.gate-lead{font-size:var(--fs-s);letter-spacing:.08em}
 body{overflow-wrap:break-word}
 .btn{overflow-wrap:anywhere;hyphens:auto}
 [tabindex="-1"]:focus{outline:none} /* reine Fokusziele (Überschrift, Formular): kein Ring */
+/* Bestand antippen: Detailansicht mit Entnehmen, Umlagern, Ausbuchen */
+.lp-btn{all:unset;box-sizing:border-box;display:flex;justify-content:space-between;gap:10px;width:100%;min-height:44px;padding:8px 0;border-top:1px solid var(--line);cursor:pointer;border-radius:6px}
+.lp-btn:first-of-type{border-top:0}
+.lp-btn:focus-visible{outline:3px solid var(--focus);outline-offset:2px}
+.lp-btn .nums:after{content:" ›";color:var(--mute);font-weight:400}
+.lp-btn.neg .lp-menge{color:var(--err)}
+.lp-detail{display:grid;gap:10px;margin-bottom:12px;border-color:var(--green)}
+.dt-kopf{display:flex;justify-content:space-between;align-items:center;gap:10px}
+.dt-kopf .lp-head{margin:0}
+.dt-zu{width:44px;min-height:44px;padding:0}
+.dt-titel{margin:0;font-size:17px}
+.lp-detail .pick-hint,.lp-detail .sub,.lp-detail .tm-label{margin:0}
+.dt-aktionen,.dt-picks{display:grid;gap:8px}
+.dt-picks .btn{justify-content:flex-start;text-align:left;font-weight:500;font-size:15px;padding:8px 12px}
+.dt-anz{grid-template-columns:48px 72px 48px}
+#dtFehler{white-space:pre-line}
 @media (prefers-reduced-motion:reduce){*{transition:none!important}.btn:active{transform:none}.spin{animation-duration:3s}}
 /* Runde 2: keine Worttrennung in Knöpfen bei 320/390 px */
 .bar:has(#pickBar:not([hidden])){grid-template-columns:repeat(2,minmax(0,1fr))}
@@ -440,8 +456,47 @@ body{overflow-wrap:break-word}
     <p class="sync-state" id="lagerSync" role="status" hidden></p>
     <div class="card lager-info">
       <b>Einbuchen und Ausbuchen</b>
-      <p class="pick-hint">Gebinde-Etikett fotografieren, dann den Lagerplatz scannen und „Einbuchen“ (z. B. Wareneingang vom Lieferanten) oder „Ausbuchen“ wählen. Umlagern für eine Pickliste geht direkt in der Pickliste.</p>
+      <p class="pick-hint">Gebinde-Etikett fotografieren, dann den Lagerplatz scannen und „Einbuchen“ (z. B. Wareneingang vom Lieferanten) oder „Ausbuchen“ wählen. Oder unten eine Bestandszeile antippen: für eine Pickliste entnehmen, umlagern oder ausbuchen.</p>
     </div>
+    <section class="card lp-detail" id="lpDetail" hidden aria-labelledby="dtTitel">
+      <div class="dt-kopf"><span class="lp-head" id="dtPlatz"></span><button class="btn dt-zu" type="button" id="dtZu" aria-label="Details schließen"><span aria-hidden="true">✕</span></button></div>
+      <h3 class="dt-titel" id="dtTitel" tabindex="-1"></h3>
+      <p class="sub" id="dtInfo"></p>
+      <p class="pick-hint" id="dtAuch" hidden></p>
+      <p class="tm-label" id="dtAktionLbl">Was möchten Sie tun?</p>
+      <div class="dt-aktionen unit" role="radiogroup" aria-labelledby="dtAktionLbl">
+        <label class="btn" id="dtPickOpt"><input class="file" type="radio" name="dtAktion" value="pick"> Für Pickliste entnehmen</label>
+        <label class="btn"><input class="file" type="radio" name="dtAktion" value="umlagern"> Umlagern</label>
+        <label class="btn"><input class="file" type="radio" name="dtAktion" value="aus"> Ausbuchen</label>
+      </div>
+      <p class="pick-hint" id="dtKeinePick" hidden>Keine offene Pickliste braucht diesen Artikel mit dieser Charge.</p>
+      <div id="dtPickRow" hidden>
+        <p class="tm-label" id="dtPickLbl">Für welche Position?</p>
+        <div class="dt-picks unit" id="dtPicks" role="radiogroup" aria-labelledby="dtPickLbl"></div>
+      </div>
+      <div class="f" id="dtZielRow" hidden>
+        <label for="dtZiel">Ziel-Lagerplatz</label>
+        <div class="lp-row">
+          <input id="dtZiel" autocapitalize="characters" autocomplete="off" spellcheck="false" maxlength="20" placeholder="Ziel scannen">
+          <label class="btn" id="dtZielBtn">Scannen<input class="file" type="file" accept="image/*" capture="environment" id="dtZielCam"></label>
+        </div>
+      </div>
+      <div class="f" id="dtAnzRow" hidden>
+        <label for="dtAnz">Anzahl Gebinde</label>
+        <div class="anz dt-anz">
+          <button class="btn" type="button" id="dtMinus" aria-label="Ein Gebinde weniger">−</button>
+          <input id="dtAnz" type="text" inputmode="numeric" value="1" maxlength="4" aria-describedby="dtAnzHint">
+          <button class="btn" type="button" id="dtPlus" aria-label="Ein Gebinde mehr">+</button>
+        </div>
+        <p class="pick-hint" id="dtAnzHint"></p>
+      </div>
+      <p class="label-check info" id="dtFehler" role="alert" hidden></p>
+      <label class="btn primary" id="dtScanBtn">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3z"/><circle cx="12" cy="13" r="3"/></svg>
+        <span id="dtScanText">Gebinde scannen und buchen</span><input class="file" type="file" accept="image/*" capture="environment" id="dtCam">
+      </label>
+      <p class="pick-hint">Zur Sicherheit wird ein Gebinde gescannt: Artikel und Charge müssen zu diesem Bestand passen.</p>
+    </section>
     <h2>Bestand <span id="bestandCount"></span></h2>
     <input id="bestandSuche" class="suche" type="search" placeholder="Lagerplatz, Artikel, Charge" autocomplete="off" spellcheck="false" aria-label="Bestand durchsuchen">
     <ul id="bestandList"></ul>
@@ -519,11 +574,11 @@ body{overflow-wrap:break-word}
 </div>
 <div id="toast" role="status" aria-live="polite"></div>
 
-<script src="parse.js?v=2026-09-25.8"></script>
-<script src="picks.js?v=2026-09-25.8"></script>
-<script src="app.js?v=2026-09-25.8"></script>
-<script src="lager.js?v=2026-09-25.8"></script>
-<script src="team.js?v=2026-09-25.8"></script>
-<script src="tour.js?v=2026-09-25.8"></script>
+<script src="parse.js?v=2026-09-25.9"></script>
+<script src="picks.js?v=2026-09-25.9"></script>
+<script src="app.js?v=2026-09-25.9"></script>
+<script src="lager.js?v=2026-09-25.9"></script>
+<script src="team.js?v=2026-09-25.9"></script>
+<script src="tour.js?v=2026-09-25.9"></script>
 </body>
 </html>
