@@ -197,7 +197,7 @@ async function pushNow() {
           saveSync(); changed = true;
           continue;
         }
-        toast('Der Server hat die Änderung abgelehnt: ' + err.message); // nicht endlos wiederholen, Änderung verfällt
+        toast(`Der Server hat die Änderung abgelehnt: ${err.message}. Bitte Teamleiter informieren.`); // nicht endlos wiederholen, Änderung verfällt
         res = { ok: true };
       }
       // Kaputter Stand auf dem Server (am Server vorbei geschrieben): nicht übernehmen und nicht endlos neu versuchen
@@ -279,7 +279,7 @@ function render() {
     entry.onclick = () => showForm(e, null, i);
     const edit = document.createElement('button');
     edit.className = 'del edit'; edit.type = 'button';
-    edit.setAttribute('aria-label', `Eintrag bearbeiten: ${e.artikel || '–'} / ${e.charge || '–'}`);
+    edit.setAttribute('aria-label', `Eintrag bearbeiten: Artikel ${e.artikel || '–'}, Charge ${e.charge || '–'}`);
     edit.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>';
     edit.onclick = entry.onclick;
     const nums = document.createElement('div'); nums.className = 'nums';
@@ -287,10 +287,10 @@ function render() {
     const b = document.createElement('b'); b.textContent = e.charge || '–'; nums.append(b);
     const del = document.createElement('button');
     del.className = 'del'; del.type = 'button';
-    del.setAttribute('aria-label', `Eintrag löschen: ${e.artikel || '–'} / ${e.charge || '–'}`);
+    del.setAttribute('aria-label', `Eintrag löschen: Artikel ${e.artikel || '–'}, Charge ${e.charge || '–'}`);
     del.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>';
     del.onclick = () => {
-      if (!confirm(`Eintrag ${e.artikel} / ${e.charge} löschen?`)) return;
+      if (!confirm(`Eintrag löschen? Artikel ${e.artikel || '–'}, Charge ${e.charge || '–'}`)) return;
       const removed = list.splice(i, 1);
       if (!save()) { list.splice(i, 0, ...removed); return; }
       render();
@@ -435,7 +435,7 @@ function renderPick() {
     const prog = document.createElement('div'); prog.className = 'sub';
     const geb = gebindeCount(l.required, l.gebinde);
     prog.textContent = (l.charge ? `Charge ${l.charge} · ` : '') + `${fmtN(l.picked)} / ${fmtN(l.required)} ${l.einheit}` +
-      (geb ? ` · ca. ${fmtN(geb)}\u00a0Gebinde je ${fmtN(l.gebinde)}\u00a0${l.einheit}` : '');
+      (geb ? ` · ca.\u00a0${fmtN(geb)}\u00a0Gebinde je ${fmtN(l.gebinde)}\u00a0${l.einheit}` : '');
     const zahl = x => x.anzahl || 1, aus = l.scans.filter(x => x.richtung !== 'ein'), auto = aus.filter(x => !x.manuell);
     const nScan = auto.reduce((s, x) => s + zahl(x), 0), nHand = aus.filter(x => x.manuell).reduce((s, x) => s + zahl(x), 0);
     const nEin = l.scans.filter(x => x.richtung === 'ein').reduce((s, x) => s + zahl(x), 0);
@@ -473,7 +473,7 @@ function renderPick() {
     const gebRow = document.createElement('div'); gebRow.className = 'sub pick-gebinde';
     gebRow.append('Gebindegröße ');
     const gebInput = document.createElement('input');
-    gebInput.type = 'text'; gebInput.inputMode = 'decimal'; gebInput.placeholder = '25';
+    gebInput.type = 'text'; gebInput.inputMode = 'decimal'; gebInput.placeholder = 'leer';
     gebInput.value = l.gebinde ? String(l.gebinde).replace('.', ',') : '';
     gebInput.setAttribute('aria-label', `Gebindegröße für ${l.artikel}`);
     // steht sie einmal fest, ändert sie nur der Teamleiter -- sonst ließe sich "ein Scan = ein Gebinde" aushebeln
@@ -901,6 +901,7 @@ function renderAnzahl() {
   const max = anzahlMax(), n = anzahlWert();
   $('anzAlle').hidden = max < 2;
   $('anzAlle').textContent = `Alle ${max}`;
+  $('anzAlle').setAttribute('aria-label', `Alle ${max} offenen Gebinde`);
   $('t-anzahl').className = 'tag' + (n > 1 ? ' check' : '');
   $('t-anzahl').textContent = n > 1 ? 'Sammelbuchung' : '';
   $('formSubmit').textContent = n > 1 ? `${n} Gebinde buchen` : 'Gebinde buchen';
@@ -999,7 +1000,7 @@ $('form').onsubmit = ev => {
   merken(e.artikel, e.menge, e.einheit);
   render(); closeForm(); toast('Hinzugefügt.');
 };
-$('cancel').onclick = () => { if (!formGeaendert || confirm('Eingaben verwerfen? Sie werden nicht gespeichert.')) closeForm(); };
+$('cancel').onclick = () => { if (!formGeaendert || confirm('Eingaben verwerfen? Sie werden nicht gespeichert.\n\nOK = verwerfen\nAbbrechen = weiter bearbeiten')) closeForm(); };
 $('manual').onclick = () => showForm({}, null);
 
 /* ---------- Scan ---------- */
@@ -1363,6 +1364,7 @@ function showGate() {
   $('gateWho').hidden = einrichten;
   $('gate').hidden = false;
   sperren(true);
+  document.title = 'Anmelden · LagerBuddy';
   closeTlForm();
   if (einrichten) setTimeout(() => $('lagerCode').focus(), 50);
   else { $('gateTitel').focus({ preventScroll: true }); ladeTeam(true); }
@@ -1380,7 +1382,7 @@ $('lagerForm').onsubmit = async ev => {
   if (!code) return;
   $('lagerBtn').disabled = true;
   try {
-    if (!(await rpc('lb_pruefen', { lager: code }))) { toast('Lager-Code falsch.'); return; }
+    if (!(await rpc('lb_pruefen', { lager: code }))) { toast('Lager-Code stimmt nicht. Bitte prüfen und neu eingeben.'); return; }
     lager = code; $('lagerCode').value = '';
     try { localStorage.setItem(KEY_LAGER, code); } catch {}
     showGate();

@@ -168,7 +168,7 @@ declare
 begin
   perform public.lb_zugang(lager);
   if id is null or length(id) > 64 or not public.lb_doc_ok(doc) then
-    raise exception 'lb_daten: ungültige Pickliste';
+    raise exception 'lb_daten: Die Pickliste ist ungültig';
   end if;
   tl := public.lb_ist_tl(tl_kuerzel, tl_pw);
   select * into alt from public.lb_picks p where p.id = lb_speichern.id for update;
@@ -259,10 +259,10 @@ declare
 begin
   perform public.lb_zugang(lager);
   if coalesce(jsonb_typeof(buchungen), '') <> 'array' or jsonb_array_length(buchungen) > 200 then
-    raise exception 'lb_daten: ungültige Buchungen';
+    raise exception 'lb_daten: Die Buchungen sind ungültig';
   end if;
   for b in select * from jsonb_array_elements(buchungen) loop
-    if not public.lb_buchung_ok(b) then raise exception 'lb_daten: ungültige Buchung'; end if;
+    if not public.lb_buchung_ok(b) then raise exception 'lb_daten: Die Buchung ist ungültig'; end if;
     insert into public.lb_bewegungen (id, ts, lagerplatz, artikel, bez, charge, menge, gebinde, einheit, richtung, quelle, pick_id, picker)
     values (b ->> 'id', to_timestamp((b ->> 'ts')::numeric / 1000), b ->> 'lagerplatz', upper(b ->> 'artikel'), coalesce(b ->> 'bez', ''),
       coalesce(b ->> 'charge', ''), (b ->> 'menge')::numeric, (b ->> 'gebinde')::integer, b ->> 'einheit', b ->> 'richtung',
@@ -329,7 +329,7 @@ create or replace function public.lb_passwort_aendern(lager text, kuerzel text, 
 language plpgsql volatile security definer set search_path = public, extensions as $$
 begin
   perform public.lb_zugang(lager);
-  if not public.lb_ist_tl(kuerzel, alt) then raise exception 'lb_teamleiter: Bisheriges Passwort falsch'; end if;
+  if not public.lb_ist_tl(kuerzel, alt) then raise exception 'lb_teamleiter: Das bisherige Passwort stimmt nicht. Bitte neu anmelden'; end if;
   if length(public.lb_norm(neu)) < 8 then raise exception 'lb_daten: Das neue Passwort braucht mindestens 8 Buchstaben oder Ziffern'; end if;
   if public.lb_norm(neu) = public.lb_norm(alt) then raise exception 'lb_daten: Bitte ein anderes Passwort als das bisherige wählen'; end if;
   perform public.lb_pw_setzen(kuerzel, neu);
@@ -352,7 +352,7 @@ begin
   if coalesce(jsonb_typeof(person), '') <> 'object' or coalesce(kz, '') !~ '^[A-Za-zÄÖÜäöüß0-9]{2,8}$'
      or length(coalesce(person ->> 'name', '')) > 60 or coalesce(v_rolle, '') not in ('picker', 'admin', 'hauptadmin')
      or coalesce(jsonb_typeof(person -> 'bereiche'), '') <> 'array' or coalesce(jsonb_typeof(person -> 'aktiv'), '') <> 'boolean' then
-    raise exception 'lb_daten: Ungültige Angaben (Kürzel 2 bis 8 Buchstaben/Ziffern)';
+    raise exception 'lb_daten: Kürzel: 2 bis 8 Buchstaben oder Ziffern, ohne Leerzeichen';
   end if;
   select array_agg(distinct x) into v_bereiche from jsonb_array_elements_text(person -> 'bereiche') x;
   if v_bereiche is null or not v_bereiche <@ array['erfassen', 'pickliste', 'lager'] then raise exception 'lb_daten: Mindestens einen gültigen Bereich wählen'; end if;
@@ -385,7 +385,7 @@ begin
   perform public.lb_zugang(lager);
   if not public.lb_ist_hauptadmin(admin_kuerzel, admin_pw) then raise exception 'lb_teamleiter: Nur der Hauptadmin darf Passwörter zurücksetzen'; end if;
   select * into p from public.lb_personen x where x.kuerzel = lb_passwort_zuruecksetzen.kuerzel;
-  if not found or p.rolle not in ('admin', 'hauptadmin') then raise exception 'lb_daten: Passwörter gibt es nur für Admins'; end if;
+  if not found or p.rolle not in ('admin', 'hauptadmin') then raise exception 'lb_daten: Passwörter gibt es nur für Teamleiter und Hauptadmin'; end if;
   perform public.lb_pw_setzen(p.kuerzel, start);
   update public.lb_personen x set pw_muss_aendern = true, geaendert = clock_timestamp() where x.kuerzel = p.kuerzel;
   return jsonb_build_object('ok', true, 'passwort', start);
