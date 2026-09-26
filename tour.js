@@ -73,7 +73,7 @@ const TOUR_MASTER = [
   { ziel: '#pickExport', vor: () => tourListe('tour-b'), titel: 'Ergebnis als Excel', text: 'Fertige Listen als Excel: Soll und Ist je Position plus jede Buchung mit Picker, Charge und Uhrzeit.' },
   { ziel: '#bar', vor: () => tourListe('tour-b'), titel: 'Ersetzen oder verwerfen', text: 'Liste per Excel neu einlesen oder ganz verwerfen. Das dürfen nur Teamleiter.' },
   { ziel: '#syncState', nur: () => SYNC_ON, vor: () => tourListe('tour-a'), titel: 'Alle Handys abgeglichen', text: 'Alle Handys gleichen sich alle paar Sekunden ab. Kein Internet? Die App schickt Änderungen nach.' },
-  { ziel: '#modeLager', immer: true, nur: () => erlaubt('lager'), vor: tourUebersicht, titel: 'Lager und Bestand', text: 'Bestand je Lagerplatz, Wareneingang einbuchen, Export als Excel. Eine Bestandszeile antippen: für eine Pickliste entnehmen, umlagern oder ausbuchen.' },
+  { ziel: '#modeLager', immer: true, nur: () => erlaubt('lager'), vor: tourUebersicht, titel: 'Lager und Bestand', text: 'Bestand je Lagerplatz, Wareneingang einbuchen, Export als Excel. Eine Bestandszeile antippen: für eine Pickliste entnehmen, umlagern oder ausbuchen. Als Teamleiter löschen Sie dort auch Bestände.' },
   { ziel: '#teamBtn', immer: true, nur: () => rang === 'hauptadmin', vor: tourUebersicht, titel: 'Team verwalten', text: 'Nur für Sie als Hauptadmin: Picker und Teamleiter anlegen, Bereiche zuweisen, Personen deaktivieren und Teamleiter-Passwörter zurücksetzen.' },
   { ziel: '#tourBtn', immer: true, vor: tourUebersicht, titel: 'Jederzeit wieder', text: 'Über das Fragezeichen starten Sie diesen Rundgang erneut. Die Picker haben ihren eigenen.' },
 ];

@@ -104,8 +104,8 @@ function renderLager() {
     st.textContent = syncErr === 'offline' ? `Offline: ${n ? (n === 1 ? '1 Buchung wartet' : n + ' Buchungen warten') + ' auf Internet' : 'zeigt den letzten Stand'}`
       : n ? `Wird übertragen … (${n})` : bestandServer ? '✓ Bestand aktuell' : 'Bestand wird geladen …';
   }
-  const q = $('bestandSuche').value.trim().toUpperCase();
-  const alle = bestand(), rows = q ? alle.filter(e => [e.lagerplatz, e.artikel, e.charge, e.bez].some(t => String(t).toUpperCase().includes(q))) : alle;
+  const q = $('bestandSuche').value.trim();
+  const alle = bestand(), rows = gefiltert(alle);
   const plaetze = new Map();
   for (const e of rows) { if (!plaetze.has(e.lagerplatz)) plaetze.set(e.lagerplatz, []); plaetze.get(e.lagerplatz).push(e); }
   $('bestandList').replaceChildren(...[...plaetze].map(([lp, items]) => {
@@ -134,8 +134,51 @@ function renderLager() {
   $('bestandLeer').hidden = !!rows.length;
   $('bestandLeer').textContent = q && alle.length ? 'Nichts gefunden.' : 'Noch nichts eingebucht.';
   $('bestandExport').hidden = role !== 'master';
+  $('bestandLoeschen').hidden = role !== 'master' || !rows.length;
+  $('bestandLoeschen').textContent = q ? `Angezeigten Bestand löschen (${rows.length})` : 'Gesamten Bestand löschen';
   dtAktualisieren();
 }
+// Bestandszeilen, die zur Suche passen (Lagerplatz, Artikel, Charge oder Bezeichnung)
+function gefiltert(alle = bestand()) {
+  const q = $('bestandSuche').value.trim().toUpperCase();
+  return q ? alle.filter(e => [e.lagerplatz, e.artikel, e.charge, e.bez].some(t => String(t).toUpperCase().includes(q))) : alle;
+}
+
+/* ---------- Bestand löschen (nur Teamleiter und Hauptadmin) ----------
+   Gelöscht wird nicht in der Datenbank, sondern per Gegenbuchung "Korrektur" auf null: Der Bestand verschwindet,
+   im Export bleibt nachvollziehbar, wer wann was gelöscht hat. Läuft offline wie jede andere Buchung. */
+function bestandLoeschen(eintraege) {
+  const ts = Date.now(); let n = 0;
+  for (const e of eintraege) {
+    if (Math.abs(e.menge) < 0.0005) continue;
+    const aus = e.menge > 0; // negativer Bestand (mehr aus- als eingebucht) wird per Einbuchung ausgeglichen
+    lagerBewegung({ ts: ts + n, lagerplatz: e.lagerplatz, richtung: aus ? 'aus' : 'ein', quelle: 'korrektur', artikel: e.artikel, bez: e.bez,
+      charge: e.charge, menge: Math.abs(e.menge), gebinde: Math.max(0, Math.round(aus ? e.gebinde : -e.gebinde)), einheit: e.einheit, picker });
+    n++;
+  }
+  return n;
+}
+$('dtLoeschen').onclick = () => {
+  if (!dt || role !== 'master') return;
+  const e = dt.e;
+  if (!confirm(`Diesen Bestand löschen?\n${e.lagerplatz} · ${e.artikel}${e.charge ? ', Charge ' + e.charge : ''}\n${fmtN(e.menge)} ${e.einheit}, ${fmtN(e.gebinde)} Gebinde\n\n` +
+    `Gebucht wird eine Korrektur auf ${picker}, im Export nachvollziehbar.\nOK = löschen\nAbbrechen = behalten`)) return;
+  bestandLoeschen([e]); dtSchliessen(); renderLager();
+  toast(`Bestand gelöscht: ${e.artikel} an ${e.lagerplatz} (${fmtN(e.menge)} ${e.einheit}).`);
+};
+$('bestandLoeschen').onclick = () => {
+  if (role !== 'master') return;
+  const rows = gefiltert(); if (!rows.length) return;
+  const q = $('bestandSuche').value.trim(), plaetze = new Set(rows.map(e => e.lagerplatz)).size;
+  const was = q ? `alle ${rows.length} angezeigten Einträge (Suche „${q}“) an ${plaetze} ${plaetze === 1 ? 'Lagerplatz' : 'Lagerplätzen'}`
+    : `den GESAMTEN Bestand: ${rows.length} Einträge an ${plaetze} ${plaetze === 1 ? 'Lagerplatz' : 'Lagerplätzen'}`;
+  const antwort = prompt(`Wirklich ${was} löschen?\n\nGebucht wird je Eintrag eine Korrektur auf ${picker}, im Export nachvollziehbar.\nZum Bestätigen LÖSCHEN eintippen.`);
+  if (antwort === null) return;
+  if (antwort.trim().toUpperCase() !== 'LÖSCHEN') { toast('Nicht gelöscht: Zum Bestätigen bitte LÖSCHEN eintippen.'); return; }
+  if (dt) dtSchliessen();
+  const n = bestandLoeschen(rows); renderLager();
+  toast(`${n === 1 ? '1 Eintrag' : n + ' Einträge'} gelöscht (Korrektur auf ${picker}).`);
+};
 $('bestandSuche').addEventListener('input', () => renderLager());
 
 /* ---------- Bestand antippen: für eine Pickliste entnehmen, umlagern oder ausbuchen ----------
@@ -174,6 +217,7 @@ function dtOeffnen(e) {
     return lab;
   }));
   dtInfo(); dtModus();
+  $('dtLoeschen').hidden = role !== 'master';
   $('lpDetail').hidden = false;
   $('lpDetail').scrollIntoView({ behavior: glatt(), block: 'start' });
   $('dtTitel').focus({ preventScroll: true });
@@ -483,7 +527,7 @@ $('bestandExport').onclick = async () => {
       liste = [...bew.offen.slice().reverse(), ...liste.map(b => ({ ...b, ts: Date.parse(b.ts), menge: Number(b.menge) }))];
     } else liste = bew.alle.slice().reverse();
     const dt = ts => (ts ? new Date(ts).toLocaleString('de-DE') : '');
-    const quelle = { pickliste: 'Pickliste', wareneingang: 'Wareneingang', lager: 'Lager' };
+    const quelle = { pickliste: 'Pickliste', wareneingang: 'Wareneingang', lager: 'Lager', korrektur: 'Korrektur (Bestand gelöscht)' };
     const b1 = [['Bestand je Lagerplatz', `Stand ${dt(Date.now())}, exportiert von ${picker}`], [],
       ['Lagerplatz', 'Artikelnummer', 'Bezeichnung', 'Charge', 'Menge', 'Einheit', 'Gebinde', 'Letzte Buchung'],
       ...bestand().map(e => [e.lagerplatz, e.artikel, e.bez, e.charge, e.menge, e.einheit, e.gebinde, dt(e.zuletzt)])];
