@@ -220,7 +220,7 @@ create table if not exists public.lb_bewegungen (
   gebinde integer not null,                 -- Anzahl Gebinde
   einheit text not null,                    -- kg | Stück
   richtung text not null,                   -- ein | aus
-  quelle text not null,                     -- pickliste | wareneingang | lager
+  quelle text not null,                     -- pickliste | wareneingang | lager | korrektur (Bestand gelöscht)
   pick_id text,
   picker text not null default '',
   erfasst timestamptz not null default clock_timestamp()
@@ -243,9 +243,11 @@ begin
   if coalesce(jsonb_typeof(b -> 'menge'), '') <> 'number' or coalesce(jsonb_typeof(b -> 'gebinde'), '') <> 'number'
      or coalesce(jsonb_typeof(b -> 'ts'), '') <> 'number' then return false; end if;
   if (b ->> 'menge')::numeric <= 0 or (b ->> 'menge')::numeric > 10000000 then return false; end if;
-  if (b ->> 'gebinde')::numeric not between 1 and 10000 or (b ->> 'gebinde')::numeric <> floor((b ->> 'gebinde')::numeric) then return false; end if;
+  -- Korrektur (Bestand löschen): bucht den Rest auf null, dabei sind auch 0 Gebinde möglich
+  if (b ->> 'gebinde')::numeric not between (case when b ->> 'quelle' = 'korrektur' then 0 else 1 end) and 10000
+     or (b ->> 'gebinde')::numeric <> floor((b ->> 'gebinde')::numeric) then return false; end if;
   if coalesce(b ->> 'einheit', '') not in ('kg', 'Stück') or coalesce(b ->> 'richtung', '') not in ('ein', 'aus')
-     or coalesce(b ->> 'quelle', '') not in ('pickliste', 'wareneingang', 'lager') then return false; end if;
+     or coalesce(b ->> 'quelle', '') not in ('pickliste', 'wareneingang', 'lager', 'korrektur') then return false; end if;
   return true;
 end $$;
 

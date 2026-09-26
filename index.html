@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'sha256-QKk+KaobPDFCPp9W5Py+/RaczXKbPYLfkqIl/BYnQ50='; img-src 'self' blob:; connect-src 'self' blob: data: https://*.supabase.co; worker-src 'self' blob:; manifest-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'sha256-pBXncsOmihVg3MmTlrVv6ysbxZaLRPF2+R7df2vReXg='; img-src 'self' blob:; connect-src 'self' blob: data: https://*.supabase.co; worker-src 'self' blob:; manifest-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'">
 <meta name="referrer" content="no-referrer">
 <meta name="theme-color" content="#0B4F82">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -274,6 +274,7 @@ body{overflow-wrap:break-word}
 .dt-picks .btn{justify-content:flex-start;text-align:left;font-weight:500;font-size:15px;padding:8px 12px}
 .dt-anz{grid-template-columns:48px 72px 48px}
 #dtFehler{white-space:pre-line}
+#bestandLoeschen{margin-top:10px}
 @media (prefers-reduced-motion:reduce){*{transition:none!important}.btn:active{transform:none}.spin{animation-duration:3s}}
 /* Runde 2: keine Worttrennung in Knöpfen bei 320/390 px */
 .bar:has(#pickBar:not([hidden])){grid-template-columns:repeat(2,minmax(0,1fr))}
@@ -496,12 +497,14 @@ body{overflow-wrap:break-word}
         <span id="dtScanText">Gebinde scannen und buchen</span><input class="file" type="file" accept="image/*" capture="environment" id="dtCam">
       </label>
       <p class="pick-hint">Zur Sicherheit wird ein Gebinde gescannt: Artikel und Charge müssen zu diesem Bestand passen.</p>
+      <button class="btn danger" type="button" id="dtLoeschen" hidden>Diesen Bestand löschen</button>
     </section>
     <h2>Bestand <span id="bestandCount"></span></h2>
     <input id="bestandSuche" class="suche" type="search" placeholder="Lagerplatz, Artikel, Charge" autocomplete="off" spellcheck="false" aria-label="Bestand durchsuchen">
     <ul id="bestandList"></ul>
     <p class="empty" id="bestandLeer">Noch nichts eingebucht.</p>
     <button class="btn" type="button" id="bestandExport" hidden>Bestand und Buchungen als Excel herunterladen</button>
+    <button class="btn danger" type="button" id="bestandLoeschen" hidden>Gesamten Bestand löschen</button>
   </div>
   <div id="teamView" hidden>
     <button class="btn pick-back" type="button" id="tmZurueck"><span aria-hidden="true">←</span> Zurück zur App</button>
@@ -574,11 +577,11 @@ body{overflow-wrap:break-word}
 </div>
 <div id="toast" role="status" aria-live="polite"></div>
 
-<script src="parse.js?v=2026-09-25.9"></script>
-<script src="picks.js?v=2026-09-25.9"></script>
-<script src="app.js?v=2026-09-25.9"></script>
-<script src="lager.js?v=2026-09-25.9"></script>
-<script src="team.js?v=2026-09-25.9"></script>
-<script src="tour.js?v=2026-09-25.9"></script>
+<script src="parse.js?v=2026-09-26.1"></script>
+<script src="picks.js?v=2026-09-26.1"></script>
+<script src="app.js?v=2026-09-26.1"></script>
+<script src="lager.js?v=2026-09-26.1"></script>
+<script src="team.js?v=2026-09-26.1"></script>
+<script src="tour.js?v=2026-09-26.1"></script>
 </body>
 </html>
