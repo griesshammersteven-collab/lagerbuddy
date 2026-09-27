@@ -1,7 +1,7 @@
 /* Regressionstests für parse.js ohne Browser: node check.js */
 'use strict';
 const assert = require('assert');
-const { picklistGridFromWords, parsePicklist } = require('./parse.js');
+const { picklistGridFromWords, parsePicklist, parseBestand } = require('./parse.js');
 
 let failed = 0;
 const test = (name, fn) => {
@@ -210,6 +210,45 @@ test('Umlagern: Einbuchen am Ziel ändert "gepickt" nicht, Ausbuchen schon', () 
     { t: 'scan', lid: 'a', scan: { ts: 61, menge: 25, anzahl: 2, picker: 'AA', lagerplatz: 'H9.01.01.00.01', richtung: 'ein' } }]);
   assert.strictEqual(d.lines[0].picked, 50);
   assert.strictEqual(d.lines[0].scans.length, 2);
+});
+
+test('Bestand aus Excel: eigener Export (Titelzeilen, Blatt "Bestand") wird wieder eingelesen', () => {
+  const raw = [['Bestand je Lagerplatz', 'Stand 26.09.2026, exportiert von CMue'], [],
+    ['Lagerplatz', 'Artikelnummer', 'Bezeichnung', 'Charge', 'Menge', 'Einheit', 'Gebinde', 'Letzte Buchung'],
+    ['H3.01.01.00.01', '93100023', 'Kakaobutter', '0001446028', 250, 'kg', 10, '26.9.2026, 08:00:00'],
+    ['H3.01.01.00.02', '91000451', 'Etikett', '500912', 24, 'Stück', 0, '']];
+  const r = parseBestand(raw);
+  assert.deepStrictEqual(r.fehler, []);
+  assert.deepStrictEqual(r.zeilen.map(z => [z.zeile, z.lagerplatz, z.artikel, z.charge, z.menge, z.einheit, z.gebinde]),
+    [[4, 'H3.01.01.00.01', '93100023', '0001446028', 250, 'kg', 10], [5, 'H3.01.01.00.02', '91000451', '500912', 24, 'Stück', 0]]);
+});
+
+test('Bestand aus Excel: fremde Liste, Einheit aus Kopf oder Zelle, Fehler mit Zeilennummer', () => {
+  const raw = [['Stellplatz', 'Material', 'Beschreibung', 'Chargennummer', 'Menge (kg)', 'Anzahl Gebinde'],
+    ['h3.01.01.00.01', ' 931 000 23 ', 'Sheabutter', 'C1', '1.250,5', '50'],
+    ['H3.01.01.00.03', '93100023', '', '', '25 kg', ''],
+    ['Regal B', '93100023', '', '', 5, 1],
+    ['H3.01.01.00.04', '', '', '', 5, 1],
+    ['H3.01.01.00.05', '93100023', '', '', 0, 1],
+    ['H3.01.01.00.06', '93100023', '', '', 5, '2,5'],
+    ['', '', '', '', '', ''],
+    ['', '', 'Summe', '', 1280.5, '']];
+  const r = parseBestand(raw, raw, 3);
+  assert.deepStrictEqual(r.zeilen.map(z => [z.zeile, z.lagerplatz, z.artikel, z.menge, z.einheit, z.gebinde]),
+    [[4, 'H3.01.01.00.01', '93100023', 1250.5, 'kg', 50], [5, 'H3.01.01.00.03', '93100023', 25, 'kg', 1]]);
+  assert.deepStrictEqual(r.fehler.map(f => f.zeile), [6, 7, 8, 9]);
+  assert.match(r.fehler[0].grund, /Lagerplatz „Regal B“ ungültig/);
+  assert.match(r.fehler[1].grund, /Artikelnummer fehlt/);
+  assert.match(r.fehler[2].grund, /Menge/);
+  assert.match(r.fehler[3].grund, /Gebinde „2,5“/);
+});
+
+test('Bestand aus Excel: ohne Einheit keine Annahme, ohne Kopf klare Meldung', () => {
+  const r = parseBestand([['Lagerplatz', 'Artikel', 'Menge', 'ME'], ['H3.01.01.00.01', '93100023', 5, ''], ['H3.01.01.00.01', '93100023', 5, 'Liter'], ['H3.01.01.00.01', '93100023', 5, 'Stk']]);
+  assert.deepStrictEqual(r.zeilen.map(z => z.einheit), ['Stück']);
+  assert.deepStrictEqual(r.fehler.map(f => f.grund), ['Einheit fehlt (kg oder Stück)', 'Einheit „Liter“ unbekannt (kg oder Stück)']);
+  assert.throws(() => parseBestand([['Artikel', 'Menge'], ['93100023', 5]]), /Lagerplatz/);
+  assert.throws(() => parseBestand([['Lagerplatz', 'Artikel'], ['H3.01.01.00.01', '93100023']]), /Menge/);
 });
 
 if (failed) { console.log(`\n${failed} Test(s) fehlgeschlagen`); process.exit(1); }
