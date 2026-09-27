@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'sha256-pBXncsOmihVg3MmTlrVv6ysbxZaLRPF2+R7df2vReXg='; img-src 'self' blob:; connect-src 'self' blob: data: https://*.supabase.co; worker-src 'self' blob:; manifest-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'sha256-OoIkkGViJE7P9bBZxfZCJMD5kwGX0e4f9mLm+4jGiC4='; img-src 'self' blob:; connect-src 'self' blob: data: https://*.supabase.co; worker-src 'self' blob:; manifest-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'">
 <meta name="referrer" content="no-referrer">
 <meta name="theme-color" content="#0B4F82">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -274,7 +274,9 @@ body{overflow-wrap:break-word}
 .dt-picks .btn{justify-content:flex-start;text-align:left;font-weight:500;font-size:15px;padding:8px 12px}
 .dt-anz{grid-template-columns:48px 72px 48px}
 #dtFehler{white-space:pre-line}
-#bestandLoeschen{margin-top:10px}
+#bestandLoeschen,#bestandExport{margin-top:10px}
+.imp-fehler{margin:4px 0 0;padding-left:20px;color:var(--mute);font-size:var(--fs-s)}
+.imp-fehler li{margin-bottom:2px}
 @media (prefers-reduced-motion:reduce){*{transition:none!important}.btn:active{transform:none}.spin{animation-duration:3s}}
 /* Runde 2: keine Worttrennung in Knöpfen bei 320/390 px */
 .bar:has(#pickBar:not([hidden])){grid-template-columns:repeat(2,minmax(0,1fr))}
@@ -499,10 +501,32 @@ body{overflow-wrap:break-word}
       <p class="pick-hint">Zur Sicherheit wird ein Gebinde gescannt: Artikel und Charge müssen zu diesem Bestand passen.</p>
       <button class="btn danger" type="button" id="dtLoeschen" hidden>Diesen Bestand löschen</button>
     </section>
+    <section class="card lp-detail" id="impPanel" hidden aria-labelledby="impTitel">
+      <div class="dt-kopf"><span class="lp-head">Bestand aus Excel</span><button class="btn dt-zu" type="button" id="impZu" aria-label="Import abbrechen"><span aria-hidden="true">✕</span></button></div>
+      <h3 class="dt-titel nums" id="impTitel" tabindex="-1"></h3>
+      <p class="sub" id="impInfo"></p>
+      <div id="impFehlerBox" hidden>
+        <p class="pick-hint" id="impFehlerKopf"></p>
+        <ul class="imp-fehler" id="impFehler"></ul>
+      </div>
+      <div id="impModusRow" hidden>
+        <p class="tm-label" id="impModusLbl"></p>
+        <div class="dt-aktionen unit" role="radiogroup" aria-labelledby="impModusLbl">
+          <label class="btn"><input class="file" type="radio" name="impModus" value="dazu"> Zusätzlich einbuchen</label>
+          <label class="btn"><input class="file" type="radio" name="impModus" value="ersetzen"> Dort ersetzen</label>
+        </div>
+        <p class="pick-hint">Ersetzen: Der bisherige Bestand an diesen Lagerplätzen wird per Korrektur gelöscht. Andere Lagerplätze bleiben, wie sie sind.</p>
+      </div>
+      <p class="label-check info" id="impErr" role="alert" hidden></p>
+      <button class="btn primary" type="button" id="impOk">Einbuchen</button>
+      <p class="pick-hint">Gebucht wird als „Import“ auf Ihr Kürzel, im Export nachvollziehbar.</p>
+    </section>
     <h2>Bestand <span id="bestandCount"></span></h2>
     <input id="bestandSuche" class="suche" type="search" placeholder="Lagerplatz, Artikel, Charge" autocomplete="off" spellcheck="false" aria-label="Bestand durchsuchen">
     <ul id="bestandList"></ul>
     <p class="empty" id="bestandLeer">Noch nichts eingebucht.</p>
+    <button class="btn" type="button" id="bestandImport" hidden>Bestand aus Excel hochladen</button>
+    <input class="file" type="file" accept=".xlsx,.xls" id="bestandFile" tabindex="-1" aria-hidden="true">
     <button class="btn" type="button" id="bestandExport" hidden>Bestand und Buchungen als Excel herunterladen</button>
     <button class="btn danger" type="button" id="bestandLoeschen" hidden>Gesamten Bestand löschen</button>
   </div>
@@ -577,11 +601,11 @@ body{overflow-wrap:break-word}
 </div>
 <div id="toast" role="status" aria-live="polite"></div>
 
-<script src="parse.js?v=2026-09-26.1"></script>
-<script src="picks.js?v=2026-09-26.1"></script>
-<script src="app.js?v=2026-09-26.1"></script>
-<script src="lager.js?v=2026-09-26.1"></script>
-<script src="team.js?v=2026-09-26.1"></script>
-<script src="tour.js?v=2026-09-26.1"></script>
+<script src="parse.js?v=2026-09-27.1"></script>
+<script src="picks.js?v=2026-09-27.1"></script>
+<script src="app.js?v=2026-09-27.1"></script>
+<script src="lager.js?v=2026-09-27.1"></script>
+<script src="team.js?v=2026-09-27.1"></script>
+<script src="tour.js?v=2026-09-27.1"></script>
 </body>
 </html>

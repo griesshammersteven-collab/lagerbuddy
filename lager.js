@@ -24,6 +24,7 @@ function saveBew() {
 }
 let bestandServer = null;
 try { const v = JSON.parse(localStorage.getItem(KEY_BESTAND)); if (Array.isArray(v)) bestandServer = v; } catch {}
+let imp = null; // Vorschau "Bestand aus Excel": { name, zeilen, fehler, plaetze: Set } (unten)
 let lagerZuletzt = null; // im Modus "Lager": zuletzt benutzter Lagerplatz und Richtung (mehrere Gebinde ins selbe Regal)
 
 /* ---------- Bestand ---------- */
@@ -51,9 +52,10 @@ const bestandVon = b => bestand().find(e => bKey(e) === bKey(b))?.menge || 0;
 
 // Neue Bewegung speichern (mit Server: im Hintergrund übertragen). Rückgabe: Hinweis für den Toast, wenn beim
 // Ausbuchen laut Bestand zu wenig am Lagerplatz lag (bucht trotzdem -- ohne Inventur ist der Anfangsbestand unbekannt).
+const neueBewegung = b => ({ id: `${b.ts}-${picker || 'x'}-${Math.random().toString(36).slice(2, 8)}`, ...b,
+  artikel: normArt(b.artikel), bez: (b.bez || '').slice(0, 200), charge: (b.charge || '').trim(), menge: rund3(b.menge), picker: b.picker || picker || '' });
 function lagerBewegung(b) {
-  const m = { id: `${b.ts}-${picker || 'x'}-${Math.random().toString(36).slice(2, 8)}`, ...b,
-    artikel: normArt(b.artikel), bez: (b.bez || '').slice(0, 200), charge: (b.charge || '').trim(), menge: rund3(b.menge), picker: b.picker || picker || '' };
+  const m = neueBewegung(b);
   let hinweis = '';
   if (m.richtung === 'aus' && bestandBekannt()) {
     const da = bestandVon(m);
@@ -64,6 +66,16 @@ function lagerBewegung(b) {
   if (SYNC_ON) setTimeout(push, 0);
   if (mode === 'lager') renderLager();
   return hinweis;
+}
+
+// Viele Bewegungen auf einmal (Bestand löschen, Import): einmal speichern und anzeigen statt je Zeile
+function bewegungenBuchen(liste) {
+  if (!liste.length) return 0;
+  (SYNC_ON ? bew.offen : bew.alle).push(...liste.map(neueBewegung));
+  saveBew();
+  if (SYNC_ON) setTimeout(push, 0);
+  if (mode === 'lager') renderLager();
+  return liste.length;
 }
 
 // Wartende Bewegungen an den Server (aus pushNow in app.js). Offline wirft rpc -> pushNow meldet "Offline".
@@ -133,10 +145,11 @@ function renderLager() {
   $('bestandCount').textContent = plaetze.size ? `(${plaetze.size} ${plaetze.size === 1 ? 'Lagerplatz' : 'Lagerplätze'})` : '';
   $('bestandLeer').hidden = !!rows.length;
   $('bestandLeer').textContent = q && alle.length ? 'Nichts gefunden.' : 'Noch nichts eingebucht.';
-  $('bestandExport').hidden = role !== 'master';
+  $('bestandExport').hidden = $('bestandImport').hidden = role !== 'master';
+  if (imp && role !== 'master') impSchliessen();
   $('bestandLoeschen').hidden = role !== 'master' || !rows.length;
   $('bestandLoeschen').textContent = q ? `Angezeigten Bestand löschen (${rows.length})` : 'Gesamten Bestand löschen';
-  dtAktualisieren();
+  dtAktualisieren(); impAktualisieren();
 }
 // Bestandszeilen, die zur Suche passen (Lagerplatz, Artikel, Charge oder Bezeichnung)
 function gefiltert(alle = bestand()) {
@@ -147,16 +160,12 @@ function gefiltert(alle = bestand()) {
 /* ---------- Bestand löschen (nur Teamleiter und Hauptadmin) ----------
    Gelöscht wird nicht in der Datenbank, sondern per Gegenbuchung "Korrektur" auf null: Der Bestand verschwindet,
    im Export bleibt nachvollziehbar, wer wann was gelöscht hat. Läuft offline wie jede andere Buchung. */
-function bestandLoeschen(eintraege) {
-  const ts = Date.now(); let n = 0;
-  for (const e of eintraege) {
-    if (Math.abs(e.menge) < 0.0005) continue;
+function bestandLoeschen(eintraege, ts = Date.now()) {
+  return bewegungenBuchen(eintraege.filter(e => Math.abs(e.menge) >= 0.0005).map((e, n) => {
     const aus = e.menge > 0; // negativer Bestand (mehr aus- als eingebucht) wird per Einbuchung ausgeglichen
-    lagerBewegung({ ts: ts + n, lagerplatz: e.lagerplatz, richtung: aus ? 'aus' : 'ein', quelle: 'korrektur', artikel: e.artikel, bez: e.bez,
-      charge: e.charge, menge: Math.abs(e.menge), gebinde: Math.max(0, Math.round(aus ? e.gebinde : -e.gebinde)), einheit: e.einheit, picker });
-    n++;
-  }
-  return n;
+    return { ts: ts + n, lagerplatz: e.lagerplatz, richtung: aus ? 'aus' : 'ein', quelle: 'korrektur', artikel: e.artikel, bez: e.bez,
+      charge: e.charge, menge: Math.abs(e.menge), gebinde: Math.max(0, Math.round(aus ? e.gebinde : -e.gebinde)), einheit: e.einheit, picker };
+  }));
 }
 $('dtLoeschen').onclick = () => {
   if (!dt || role !== 'master') return;
@@ -180,6 +189,83 @@ $('bestandLoeschen').onclick = () => {
   toast(`${n === 1 ? '1 Eintrag' : n + ' Einträge'} gelöscht (Korrektur auf ${picker}).`);
 };
 $('bestandSuche').addEventListener('input', () => renderLager());
+
+/* ---------- Bestand aus Excel hochladen (nur Teamleiter und Hauptadmin) ----------
+   Z. B. der vorhandene Bestand beim Start mit LagerBuddy oder eine Inventur. Jede gültige Zeile wird als Einbuchung
+   "import" gebucht (Historie bleibt, offline wie jede Buchung). Ungültige Zeilen werden mit Zeilennummer genannt und
+   übersprungen. Liegt an den Lagerplätzen schon Bestand, entscheidet der Teamleiter: zusätzlich oder ersetzen
+   (Ersetzen = vorher Korrektur auf null, nur an den Lagerplätzen aus der Datei). */
+const impModus = () => document.querySelector('input[name=impModus]:checked')?.value || '';
+const impVorhanden = () => imp ? bestand().filter(e => imp.plaetze.has(e.lagerplatz)) : [];
+function impFehler(msg) { $('impErr').textContent = msg; $('impErr').hidden = !msg; }
+function impOeffnen(name, r) {
+  if (dt) dtSchliessen();
+  imp = { name, ...r, plaetze: new Set(r.zeilen.map(z => z.lagerplatz)) };
+  const n = r.zeilen.length, m = imp.plaetze.size, summe = einheit => rund3(r.zeilen.filter(z => z.einheit === einheit).reduce((a, z) => a + z.menge, 0));
+  const geb = r.zeilen.reduce((a, z) => a + z.gebinde, 0), kg = summe('kg'), st = summe('Stück');
+  $('impTitel').textContent = name;
+  $('impInfo').textContent = `${n === 1 ? '1 Bestandszeile' : n + ' Bestandszeilen'} an ${m === 1 ? '1 Lagerplatz' : m + ' Lagerplätzen'}: ` +
+    [kg && `${fmtN(kg)}\u00a0kg`, st && `${fmtN(st)}\u00a0Stück`, `${fmtN(geb)}\u00a0Gebinde`].filter(Boolean).join(', ') + '.';
+  const f = r.fehler.length;
+  $('impFehlerBox').hidden = !f;
+  $('impFehlerKopf').textContent = `${f === 1 ? '1 Zeile wird' : f + ' Zeilen werden'} übersprungen:`;
+  const zeig = r.fehler.slice(0, 8).map(x => `Zeile ${x.zeile}: ${x.grund}`);
+  if (f > 8) zeig.push(`und ${f - 8} weitere`);
+  $('impFehler').replaceChildren(...zeig.map(t => Object.assign(document.createElement('li'), { textContent: t })));
+  for (const el of document.getElementsByName('impModus')) el.checked = false;
+  impFehler(''); impAktualisieren();
+  $('impPanel').hidden = false;
+  $('impPanel').scrollIntoView({ behavior: glatt(), block: 'start' });
+  $('impTitel').focus({ preventScroll: true });
+}
+// Vorhandener Bestand kann sich während der Vorschau ändern (Abgleich mit anderen Handys): Auswahl nur, wenn nötig
+function impAktualisieren() {
+  if (!imp) return;
+  const v = impVorhanden(), k = new Set(v.map(e => e.lagerplatz)).size;
+  $('impModusRow').hidden = !v.length;
+  $('impModusLbl').textContent = `An ${k === 1 ? '1 dieser Lagerplätze' : k + ' dieser Lagerplätze'} liegt schon Bestand (${v.length === 1 ? '1 Eintrag' : v.length + ' Einträge'}). Was soll damit passieren?`;
+}
+function impSchliessen() {
+  imp = null; $('impPanel').hidden = true;
+  if (!$('bestandImport').hidden) $('bestandImport').focus({ preventScroll: true });
+}
+$('bestandImport').onclick = () => { if (role === 'master') $('bestandFile').click(); };
+$('bestandFile').onchange = async ev => {
+  const file = ev.target.files[0]; ev.target.value = '';
+  if (!file) return;
+  if (role !== 'master') { toast('Nur Teamleiter können Bestand aus Excel laden.'); return; }
+  try {
+    await loadScript('xlsx.mini.min.js');
+    const wb = XLSX.read(await file.arrayBuffer(), { type: 'array' });
+    const ws = wb.Sheets[wb.SheetNames.find(n => n.trim().toLowerCase() === 'bestand') || wb.SheetNames[0]]; // eigener Export: Blatt "Bestand"
+    const start = ws['!ref'] ? XLSX.utils.decode_range(ws['!ref']).s.r + 1 : 1;
+    const raw = XLSX.utils.sheet_to_json(ws, { header: 1, raw: true, defval: '', blankrows: true });
+    const fmt = XLSX.utils.sheet_to_json(ws, { header: 1, raw: false, defval: '', blankrows: true });
+    const r = parseBestand(raw, fmt, start);
+    if (!r.zeilen.length) {
+      toast(r.fehler.length ? `Keine gültige Bestandszeile gefunden. Zum Beispiel Zeile ${r.fehler[0].zeile}: ${r.fehler[0].grund}.` : 'In der Tabelle steht kein Bestand.');
+      return;
+    }
+    impOeffnen(file.name, r);
+  } catch (err) {
+    if (!err?.userMessage) console.error(err);
+    toast(err?.userMessage ? err.message : 'Excel-Datei konnte nicht gelesen werden.');
+  }
+};
+$('impZu').onclick = impSchliessen;
+for (const el of document.getElementsByName('impModus')) el.onchange = () => impFehler('');
+$('impOk').onclick = () => {
+  if (!imp || role !== 'master') return;
+  const vorhanden = impVorhanden(), modus = vorhanden.length ? impModus() : 'dazu';
+  if (!modus) { impFehler('Bitte wählen: zusätzlich einbuchen oder dort ersetzen.'); document.querySelector('input[name=impModus]').focus(); return; }
+  const ts = Date.now(), weg = modus === 'ersetzen' ? bestandLoeschen(vorhanden, ts) : 0;
+  const n = bewegungenBuchen(imp.zeilen.map((z, i) => ({ ts: ts + weg + i, lagerplatz: z.lagerplatz, richtung: 'ein', quelle: 'import', artikel: z.artikel,
+    bez: z.bez, charge: z.charge, menge: z.menge, gebinde: z.gebinde, einheit: z.einheit, picker })));
+  const f = imp.fehler.length;
+  impSchliessen(); renderLager();
+  toast(`${n === 1 ? '1 Bestandszeile' : n + ' Bestandszeilen'} eingebucht` + (weg ? `, ${weg === 1 ? '1 alter Eintrag' : weg + ' alte Einträge'} ersetzt` : '') +
+    (f ? `, ${f === 1 ? '1 Zeile' : f + ' Zeilen'} übersprungen` : '') + '.');
+};
 
 /* ---------- Bestand antippen: für eine Pickliste entnehmen, umlagern oder ausbuchen ----------
    Der Picker steht am Regal und bedient von dort offene Picklisten. Aus dem Bestand heraus gilt die Reihenfolge der
@@ -527,7 +613,7 @@ $('bestandExport').onclick = async () => {
       liste = [...bew.offen.slice().reverse(), ...liste.map(b => ({ ...b, ts: Date.parse(b.ts), menge: Number(b.menge) }))];
     } else liste = bew.alle.slice().reverse();
     const dt = ts => (ts ? new Date(ts).toLocaleString('de-DE') : '');
-    const quelle = { pickliste: 'Pickliste', wareneingang: 'Wareneingang', lager: 'Lager', korrektur: 'Korrektur (Bestand gelöscht)' };
+    const quelle = { pickliste: 'Pickliste', wareneingang: 'Wareneingang', lager: 'Lager', korrektur: 'Korrektur (Bestand gelöscht)', import: 'Import (Excel)' };
     const b1 = [['Bestand je Lagerplatz', `Stand ${dt(Date.now())}, exportiert von ${picker}`], [],
       ['Lagerplatz', 'Artikelnummer', 'Bezeichnung', 'Charge', 'Menge', 'Einheit', 'Gebinde', 'Letzte Buchung'],
       ...bestand().map(e => [e.lagerplatz, e.artikel, e.bez, e.charge, e.menge, e.einheit, e.gebinde, dt(e.zuletzt)])];

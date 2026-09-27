@@ -307,6 +307,58 @@ function findLagerplatz(text) {
   return [...new Set(m.map(s => s.replace(/\s/g, '').replace(/[,:;·]/g, '.')))].filter(s => LAGERPLATZ.test(s));
 }
 
+// Bestand aus Excel (Teamleiter, Modus Lager): eine Zeile je Lagerplatz, Artikel und Charge. Versteht den eigenen
+// Export (Titelzeilen, Blatt "Bestand") und fremde Listen mit ähnlichen Spaltennamen. raw/fmt wie bei parsePicklist.
+// Ergebnis: { zeilen: [{ zeile, lagerplatz, artikel, bez, charge, menge, einheit, gebinde }], fehler: [{ zeile, grund }] }
+// zeile = Zeilennummer in Excel (ab 1, erste Zeile des Blatts = start), damit der Teamleiter die Stelle findet.
+function parseBestand(raw, fmt = raw, start = 1) {
+  const passt = (c, namen, genau = []) => { const h = normH(c); return !!h && (genau.includes(h) || namen.some(n => h.startsWith(n))); };
+  const SP = {
+    lp: [['lagerplatz', 'stellplatz', 'regalplatz', 'bincode'], ['platz', 'lp', 'bin']],
+    art: [['artikelnummer', 'artikelnr', 'materialnummer', 'materialnr'], ['artikel', 'artnr', 'material']],
+    bez: [['bezeichnung', 'beschreibung', 'artikelbezeichnung', 'materialbezeichnung'], []],
+    charge: [['charge', 'lot'], []],
+    menge: [['menge', 'bestand'], ['gewicht']],
+    einheit: [['einheit', 'mengeneinheit', 'basiseinheit'], ['me']],
+    gebinde: [['gebinde', 'anzahlgebinde', 'anzahl'], []],
+  };
+  const spalte = (r, [namen, genau]) => r.findIndex(c => passt(c, namen, genau));
+  const h = raw.slice(0, 30).findIndex(r => spalte(r, SP.lp) >= 0 && spalte(r, SP.art) >= 0);
+  if (h < 0) throw pickErr('Spalten "Lagerplatz" und "Artikelnummer" nicht gefunden. Bitte die Kopfzeile prüfen.');
+  const col = Object.fromEntries(Object.entries(SP).map(([k, v]) => [k, spalte(raw[h], v)]));
+  if (col.menge < 0) throw pickErr('Spalte "Menge" nicht gefunden. Bitte die Kopfzeile prüfen.');
+  const kopfMenge = normH(raw[h][col.menge]);
+  const text = (i, j) => (j < 0 ? '' : String(fmt[i]?.[j] ?? '').trim());
+  const zeilen = [], fehler = [];
+  for (let i = h + 1; i < raw.length; i++) {
+    const zeile = i + start;
+    if (!(raw[i] || []).some(c => String(c ?? '').trim())) continue;
+    const roh = text(i, col.lp), art = normArt(text(i, col.art));
+    if (!roh && !art) continue; // Summen- oder Fußzeile ohne Platz und Artikel
+    const lps = findLagerplatz(roh);
+    if (lps.length !== 1) { fehler.push({ zeile, grund: roh ? `Lagerplatz „${roh}“ ungültig` : 'Lagerplatz fehlt' }); continue; }
+    if (!art || art.length > 64) { fehler.push({ zeile, grund: art ? 'Artikelnummer zu lang' : 'Artikelnummer fehlt' }); continue; }
+    const q = parseQty(raw[i][col.menge], text(i, col.menge));
+    if (!q || !(q.n > 0)) { fehler.push({ zeile, grund: 'Menge fehlt oder ist nicht größer als 0' }); continue; }
+    if (q.n > 10000000) { fehler.push({ zeile, grund: 'Menge zu groß' }); continue; }
+    const e = text(i, col.einheit).toLowerCase();
+    const einheit = /^(kg|kilo)/.test(e) ? 'kg' : /^(st|pcs|pc|ea)/.test(e) ? 'Stück'
+      : e ? null : q.kg || /kg$/.test(kopfMenge) || kopfMenge.startsWith('gewicht') ? 'kg' : /(stk|stück|st)$/.test(kopfMenge) ? 'Stück' : null;
+    if (!einheit) { fehler.push({ zeile, grund: e ? `Einheit „${text(i, col.einheit)}“ unbekannt (kg oder Stück)` : 'Einheit fehlt (kg oder Stück)' }); continue; }
+    let gebinde = 1;
+    const g = text(i, col.gebinde);
+    if (g) {
+      gebinde = parseDe(g);
+      // 0 ist erlaubt: angebrochenes Gebinde, wie es im eigenen Export stehen kann
+      if (!(gebinde >= 0 && gebinde <= 10000 && Number.isInteger(gebinde))) { fehler.push({ zeile, grund: `Gebinde „${g}“ ungültig (ganze Zahl)` }); continue; }
+    }
+    const charge = text(i, col.charge);
+    if (charge.length > 64) { fehler.push({ zeile, grund: 'Charge zu lang' }); continue; }
+    zeilen.push({ zeile, lagerplatz: lps[0], artikel: art, bez: text(i, col.bez).slice(0, 200), charge, menge: Math.round(q.n * 1000) / 1000, einheit, gebinde });
+  }
+  return { zeilen, fehler };
+}
+
 // Tabellenlinien vor der Texterkennung entfernen: die dicken Rasterlinien der Druck-Pickliste hält Tesseract
 // sonst für Text/Blöcke und liest dann fast nichts (echtes Foto 23.09.2026: 8 von 17 Werten, ohne Linien 14).
 // rgba: ImageData.data, Ergebnis: neues RGBA-Bild, Schrift schwarz auf weiß.
@@ -574,4 +626,4 @@ function applyPicklist(r, codes, lines) {
   return out;
 }
 
-if (typeof module !== 'undefined') module.exports = { parseDe, stripBars, findLagerplatz, LAGERPLATZ, cleanLine, parseLabel, parsePicklist, applyPicklist, picklistGridFromWords, stripTableLines, skewAngle, verticalTextScore, gebindeCount, normArt, normCharge, requiredLabelColor, classifyLabelColor };
+if (typeof module !== 'undefined') module.exports = { parseDe, stripBars, findLagerplatz, LAGERPLATZ, parseBestand, cleanLine, parseLabel, parsePicklist, applyPicklist, picklistGridFromWords, stripTableLines, skewAngle, verticalTextScore, gebindeCount, normArt, normCharge, requiredLabelColor, classifyLabelColor };
