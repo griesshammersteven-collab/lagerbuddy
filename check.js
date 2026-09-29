@@ -1,7 +1,7 @@
 /* Regressionstests für parse.js ohne Browser: node check.js */
 'use strict';
 const assert = require('assert');
-const { picklistGridFromWords, parsePicklist, parseBestand } = require('./parse.js');
+const { picklistGridFromWords, parsePicklist, parseBestand, lagerplatzAusText } = require('./parse.js');
 
 let failed = 0;
 const test = (name, fn) => {
@@ -227,7 +227,7 @@ test('Bestand aus Excel: fremde Liste, Einheit aus Kopf oder Zelle, Fehler mit Z
   const raw = [['Stellplatz', 'Material', 'Beschreibung', 'Chargennummer', 'Menge (kg)', 'Anzahl Gebinde'],
     ['h3.01.01.00.01', ' 931 000 23 ', 'Sheabutter', 'C1', '1.250,5', '50'],
     ['H3.01.01.00.03', '93100023', '', '', '25 kg', ''],
-    ['Regal B', '93100023', '', '', 5, 1],
+    ['H3.01.01', '93100023', '', '', 5, 1],
     ['H3.01.01.00.04', '', '', '', 5, 1],
     ['H3.01.01.00.05', '93100023', '', '', 0, 1],
     ['H3.01.01.00.06', '93100023', '', '', 5, '2,5'],
@@ -237,7 +237,7 @@ test('Bestand aus Excel: fremde Liste, Einheit aus Kopf oder Zelle, Fehler mit Z
   assert.deepStrictEqual(r.zeilen.map(z => [z.zeile, z.lagerplatz, z.artikel, z.menge, z.einheit, z.gebinde]),
     [[4, 'H3.01.01.00.01', '93100023', 1250.5, 'kg', 50], [5, 'H3.01.01.00.03', '93100023', 25, 'kg', 1]]);
   assert.deepStrictEqual(r.fehler.map(f => f.zeile), [6, 7, 8, 9]);
-  assert.match(r.fehler[0].grund, /Lagerplatz „Regal B“ ungültig/);
+  assert.match(r.fehler[0].grund, /Lagerplatz „H3.01.01“ ungültig/);
   assert.match(r.fehler[1].grund, /Artikelnummer fehlt/);
   assert.match(r.fehler[2].grund, /Menge/);
   assert.match(r.fehler[3].grund, /Gebinde „2,5“/);
@@ -249,6 +249,22 @@ test('Bestand aus Excel: ohne Einheit keine Annahme, ohne Kopf klare Meldung', (
   assert.deepStrictEqual(r.fehler.map(f => f.grund), ['Einheit fehlt (kg oder Stück)', 'Einheit „Liter“ unbekannt (kg oder Stück)']);
   assert.throws(() => parseBestand([['Artikel', 'Menge'], ['93100023', 5]]), /Lagerplatz/);
   assert.throws(() => parseBestand([['Lagerplatz', 'Artikel'], ['H3.01.01.00.01', '93100023']]), /Menge/);
+});
+
+test('Lagerplatz als Name ohne Barcode ("Bühl"), angefangene Codes bleiben Fehler', () => {
+  assert.deepStrictEqual(lagerplatzAusText(' Bühl '), { lp: 'Bühl', frei: true });
+  assert.deepStrictEqual(lagerplatzAusText('Rampe   2'), { lp: 'Rampe 2', frei: true });
+  assert.deepStrictEqual(lagerplatzAusText('Lager/Nord-1'), { lp: 'Lager/Nord-1', frei: true });
+  assert.deepStrictEqual(lagerplatzAusText('h3.01.01.00.01'), { lp: 'H3.01.01.00.01' });
+  assert.strictEqual(lagerplatzAusText('  '), null);
+  assert.match(lagerplatzAusText('H3.01.01').fehler, /kein gültiger Lagerplatz/);
+  assert.match(lagerplatzAusText('h3 01').fehler, /kein gültiger Lagerplatz/);
+  for (const t of ['X', 'Bühl!', 'a'.repeat(41), '-Rampe', 'Rampe-']) assert.ok(lagerplatzAusText(t).fehler, t);
+});
+
+test('Bestand aus Excel: Lagerplatz "Bühl" als Name', () => {
+  const r = parseBestand([['Lagerplatz', 'Artikel', 'Menge', 'Einheit'], ['Bühl', '93100023', 5, 'kg'], ['H3.01.01.00.01', '93100023', 5, 'kg']]);
+  assert.deepStrictEqual(r.zeilen.map(z => [z.lagerplatz, z.frei]), [['Bühl', true], ['H3.01.01.00.01', false]]);
 });
 
 if (failed) { console.log(`\n${failed} Test(s) fehlgeschlagen`); process.exit(1); }

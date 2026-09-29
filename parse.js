@@ -307,6 +307,22 @@ function findLagerplatz(text) {
   return [...new Set(m.map(s => s.replace(/\s/g, '').replace(/[,:;·]/g, '.')))].filter(s => LAGERPLATZ.test(s));
 }
 
+// Freier Lagerplatz ohne Barcode, z. B. "Bühl" oder "Rampe 2": 2 bis 40 Zeichen, Buchstaben, Ziffern, Leerzeichen,
+// . / _ - (Server prüft dasselbe in lb_buchung_ok). Sieht die Eingabe aus wie ein angefangener Barcode-Lagerplatz
+// ("H3.01.01"), ist sie ein Tippfehler und kein Name.
+const LP_FREI = /^[A-Za-zÄÖÜäöüß0-9][A-Za-zÄÖÜäöüß0-9 ./_-]{0,38}[A-Za-zÄÖÜäöüß0-9.]$/;
+const LP_CODEARTIG = /^[A-Z]\s?\d{1,3}(\s?[.,:;·]\s?\d|\s\d{2})/i;
+// Eingabe (getippt oder aus Excel) -> { lp } (Barcode-Schema), { lp, frei: true } (Name) oder { fehler } / null (leer)
+function lagerplatzAusText(text) {
+  const t = String(text ?? '').trim().replace(/\s+/g, ' ');
+  if (!t) return null;
+  const [code] = findLagerplatz(t);
+  if (code) return { lp: code };
+  if (LP_CODEARTIG.test(t)) return { fehler: `„${t}“ ist kein gültiger Lagerplatz. Richtig ist z. B. H3.01.01.00.01.` };
+  if (LP_FREI.test(t)) return { lp: t, frei: true };
+  return { fehler: `„${t}“ geht nicht als Lagerplatz: 2 bis 40 Zeichen, nur Buchstaben, Ziffern, Leerzeichen und . / _ -` };
+}
+
 // Bestand aus Excel (Teamleiter, Modus Lager): eine Zeile je Lagerplatz, Artikel und Charge. Versteht den eigenen
 // Export (Titelzeilen, Blatt "Bestand") und fremde Listen mit ähnlichen Spaltennamen. raw/fmt wie bei parsePicklist.
 // Ergebnis: { zeilen: [{ zeile, lagerplatz, artikel, bez, charge, menge, einheit, gebinde }], fehler: [{ zeile, grund }] }
@@ -335,8 +351,8 @@ function parseBestand(raw, fmt = raw, start = 1) {
     if (!(raw[i] || []).some(c => String(c ?? '').trim())) continue;
     const roh = text(i, col.lp), art = normArt(text(i, col.art));
     if (!roh && !art) continue; // Summen- oder Fußzeile ohne Platz und Artikel
-    const lps = findLagerplatz(roh);
-    if (lps.length !== 1) { fehler.push({ zeile, grund: roh ? `Lagerplatz „${roh}“ ungültig` : 'Lagerplatz fehlt' }); continue; }
+    const lp = lagerplatzAusText(roh);
+    if (!lp || lp.fehler) { fehler.push({ zeile, grund: roh ? `Lagerplatz „${roh}“ ungültig` : 'Lagerplatz fehlt' }); continue; }
     if (!art || art.length > 64) { fehler.push({ zeile, grund: art ? 'Artikelnummer zu lang' : 'Artikelnummer fehlt' }); continue; }
     const q = parseQty(raw[i][col.menge], text(i, col.menge));
     if (!q || !(q.n > 0)) { fehler.push({ zeile, grund: 'Menge fehlt oder ist nicht größer als 0' }); continue; }
@@ -354,7 +370,7 @@ function parseBestand(raw, fmt = raw, start = 1) {
     }
     const charge = text(i, col.charge);
     if (charge.length > 64) { fehler.push({ zeile, grund: 'Charge zu lang' }); continue; }
-    zeilen.push({ zeile, lagerplatz: lps[0], artikel: art, bez: text(i, col.bez).slice(0, 200), charge, menge: Math.round(q.n * 1000) / 1000, einheit, gebinde });
+    zeilen.push({ zeile, lagerplatz: lp.lp, frei: !!lp.frei, artikel: art, bez: text(i, col.bez).slice(0, 200), charge, menge: Math.round(q.n * 1000) / 1000, einheit, gebinde });
   }
   return { zeilen, fehler };
 }
@@ -626,4 +642,4 @@ function applyPicklist(r, codes, lines) {
   return out;
 }
 
-if (typeof module !== 'undefined') module.exports = { parseDe, stripBars, findLagerplatz, LAGERPLATZ, parseBestand, cleanLine, parseLabel, parsePicklist, applyPicklist, picklistGridFromWords, stripTableLines, skewAngle, verticalTextScore, gebindeCount, normArt, normCharge, requiredLabelColor, classifyLabelColor };
+if (typeof module !== 'undefined') module.exports = { parseDe, stripBars, findLagerplatz, LAGERPLATZ, lagerplatzAusText, parseBestand, cleanLine, parseLabel, parsePicklist, applyPicklist, picklistGridFromWords, stripTableLines, skewAngle, verticalTextScore, gebindeCount, normArt, normCharge, requiredLabelColor, classifyLabelColor };

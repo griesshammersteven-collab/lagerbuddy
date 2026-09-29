@@ -200,12 +200,20 @@ const impVorhanden = () => imp ? bestand().filter(e => imp.plaetze.has(e.lagerpl
 function impFehler(msg) { $('impErr').textContent = msg; $('impErr').hidden = !msg; }
 function impOeffnen(name, r) {
   if (dt) dtSchliessen();
-  imp = { name, ...r, plaetze: new Set(r.zeilen.map(z => z.lagerplatz)) };
+  // Namen ohne Barcode: Schreibweise wie schon bekannt bzw. wie beim ersten Vorkommen in der Datei
+  const namen = lpNamen(), neu = new Map();
+  for (const z of r.zeilen) if (z.frei) {
+    const k = lpKlein(z.lagerplatz);
+    if (namen.has(k)) z.lagerplatz = namen.get(k);
+    else { if (!neu.has(k)) neu.set(k, z.lagerplatz); z.lagerplatz = neu.get(k); }
+  }
+  imp = { name, ...r, neu: [...neu.values()], plaetze: new Set(r.zeilen.map(z => z.lagerplatz)) };
   const n = r.zeilen.length, m = imp.plaetze.size, summe = einheit => rund3(r.zeilen.filter(z => z.einheit === einheit).reduce((a, z) => a + z.menge, 0));
   const geb = r.zeilen.reduce((a, z) => a + z.gebinde, 0), kg = summe('kg'), st = summe('Stück');
   $('impTitel').textContent = name;
   $('impInfo').textContent = `${n === 1 ? '1 Bestandszeile' : n + ' Bestandszeilen'} an ${m === 1 ? '1 Lagerplatz' : m + ' Lagerplätzen'}: ` +
-    [kg && `${fmtN(kg)}\u00a0kg`, st && `${fmtN(st)}\u00a0Stück`, `${fmtN(geb)}\u00a0Gebinde`].filter(Boolean).join(', ') + '.';
+    [kg && `${fmtN(kg)}\u00a0kg`, st && `${fmtN(st)}\u00a0Stück`, `${fmtN(geb)}\u00a0Gebinde`].filter(Boolean).join(', ') + '.' +
+    (imp.neu.length ? ` Neu ohne Barcode: ${imp.neu.slice(0, 5).map(x => `„${x}“`).join(', ')}${imp.neu.length > 5 ? ` und ${imp.neu.length - 5} weitere` : ''}.` : '');
   const f = r.fehler.length;
   $('impFehlerBox').hidden = !f;
   $('impFehlerKopf').textContent = `${f === 1 ? '1 Zeile wird' : f + ' Zeilen werden'} übersprungen:`;
@@ -262,6 +270,7 @@ $('impOk').onclick = () => {
   const n = bewegungenBuchen(imp.zeilen.map((z, i) => ({ ts: ts + weg + i, lagerplatz: z.lagerplatz, richtung: 'ein', quelle: 'import', artikel: z.artikel,
     bez: z.bez, charge: z.charge, menge: z.menge, gebinde: z.gebinde, einheit: z.einheit, picker })));
   const f = imp.fehler.length;
+  for (const lp of imp.neu) lpNameMerken(lp);
   impSchliessen(); renderLager();
   toast(`${n === 1 ? '1 Bestandszeile' : n + ' Bestandszeilen'} eingebucht` + (weg ? `, ${weg === 1 ? '1 alter Eintrag' : weg + ' alte Einträge'} ersetzt` : '') +
     (f ? `, ${f === 1 ? '1 Zeile' : f + ' Zeilen'} übersprungen` : '') + '.');
@@ -376,9 +385,15 @@ $('dtScanBtn').addEventListener('click', ev => {
   if (!a) fehler = 'Bitte zuerst wählen: entnehmen, umlagern oder ausbuchen.';
   else if (a === 'pick' && !dtZeile()) fehler = 'Bitte die Position wählen.';
   else if (a === 'umlagern') {
-    const [z] = findLagerplatz($('dtZiel').value);
-    if (!z) fehler = 'Bitte den Ziel-Lagerplatz scannen oder eintippen (z. B. H3.01.01.00.01).';
-    else if (z === dt.e.lagerplatz) fehler = 'Ziel und Herkunft sind derselbe Lagerplatz.';
+    const z = lpPruefen($('dtZiel').value);
+    if (z.fehler) fehler = $('dtZiel').value.trim() ? z.fehler : 'Bitte den Ziel-Lagerplatz scannen oder eintippen (z. B. H3.01.01.00.01 oder Bühl).';
+    else if (z.lp === dt.e.lagerplatz) fehler = 'Ziel und Herkunft sind derselbe Lagerplatz.';
+    else if (z.neu) { // erst bestätigen, dann erneut tippen: nach dem Dialog öffnen manche Browser die Kamera nicht mehr
+      ev.preventDefault();
+      if (!lpNeuOk(z.lp)) { $('dtZiel').focus(); return; }
+      lpNameMerken(z.lp); $('dtZiel').value = z.lp;
+      dtFehler(`„${z.lp}“ ist angelegt. Jetzt das Gebinde scannen.`); return;
+    } else $('dtZiel').value = z.lp;
   }
   if (fehler) { ev.preventDefault(); dtFehler(fehler); }
 });
@@ -455,7 +470,7 @@ function dtBuchen(r, fp) {
   if (!g) { dtFehler('Die Menge je Gebinde ist unbekannt. Bitte über „Gebinde ein- oder ausbuchen“ mit Menge buchen.'); return; }
   const menge = rund3(n * g);
   if (a === 'umlagern') {
-    const [ziel] = findLagerplatz($('dtZiel').value);
+    const ziel = lpPruefen($('dtZiel').value).lp;
     if (!ziel || ziel === e.lagerplatz) { dtFehler('Bitte einen anderen Ziel-Lagerplatz wählen.'); return; }
     if (!confirm(`${n} Gebinde je ${fmtN(g)} ${e.einheit} = ${fmtN(menge)} ${e.einheit} umlagern?\nVon ${e.lagerplatz} nach ${ziel}\n\nGebucht auf ${picker}. Mit OK bestätigen Sie, ${geprueft} geprüft zu haben.${zuWenig}`)) return;
     const b = { lagerplatz: e.lagerplatz, quelle: 'lager', artikel: e.artikel, bez: e.bez, charge, menge, gebinde: n, einheit: e.einheit, picker };
@@ -485,13 +500,46 @@ function lpVorschlag(r) {
   $('t-lp').className = 'tag' + (v ? ' ok' : ''); $('t-lp').textContent = v ? 'gemerkt' : '';
 }
 $('lpCode').addEventListener('input', () => { $('t-lp').className = 'tag'; $('t-lp').textContent = ''; });
+/* ---------- Lagerplätze ohne Barcode ("Bühl", "Rampe 2") ----------
+   Neben dem Barcode-Schema H3.01.01.00.01 sind Namen erlaubt. Groß/klein zählt nicht: "bühl" wird zum schon bekannten
+   "Bühl", damit kein zweiter Lagerplatz entsteht. Ein noch unbekannter Name wird einmal bestätigt (Tippfehler) und
+   auf diesem Handy gemerkt; bekannt sind außerdem alle Namen aus Bestand und Buchungen (auch von anderen Handys). */
+const KEY_LP_NAMEN = 'lagerbuddy_lagerplatz_namen_v1';
+const lpKlein = lp => lp.toLocaleLowerCase('de');
+function lpNamen() { // klein -> Schreibweise
+  const m = new Map(), add = lp => { if (lp && !LAGERPLATZ.test(lp) && !m.has(lpKlein(lp))) m.set(lpKlein(lp), lp); };
+  try { for (const lp of JSON.parse(localStorage.getItem(KEY_LP_NAMEN)) || []) add(lp); } catch {}
+  for (const e of bestand()) add(e.lagerplatz);
+  for (const b of [...bew.offen, ...bew.alle]) add(b.lagerplatz);
+  return m;
+}
+function lpNameMerken(lp) {
+  if (LAGERPLATZ.test(lp)) return;
+  let l = []; try { l = JSON.parse(localStorage.getItem(KEY_LP_NAMEN)) || []; } catch {}
+  l = [lp, ...l.filter(x => lpKlein(x) !== lpKlein(lp))].slice(0, 100);
+  try { localStorage.setItem(KEY_LP_NAMEN, JSON.stringify(l)); } catch {}
+}
+// Eingabe prüfen: { lp, neu } oder { fehler }. neu = Name, den es noch nicht gibt (vor dem Buchen bestätigen lassen)
+function lpPruefen(roh) {
+  const r = lagerplatzAusText(roh);
+  if (!r) return { fehler: 'Bitte den Lagerplatz scannen oder eintippen (z. B. H3.01.01.00.01 oder Bühl).' };
+  if (r.fehler || !r.frei) return r;
+  const bekannt = lpNamen().get(lpKlein(r.lp));
+  return { lp: bekannt || r.lp, neu: !bekannt };
+}
+const lpNeuOk = lp => confirm(`„${lp}“ ist ein neuer Lagerplatz ohne Barcode.\n\nOK = anlegen und buchen\nAbbrechen = Namen korrigieren`);
+// Vorschläge beim Tippen: bekannte Namen (Barcode-Plätze scannt man)
+function lpVorschlaege() { $('lpNamen').replaceChildren(...[...lpNamen().values()].sort((a, b) => a.localeCompare(b, 'de')).map(v => Object.assign(document.createElement('option'), { value: v }))); }
+for (const id of ['lpCode', 'dtZiel']) $(id).addEventListener('focus', lpVorschlaege);
+
 function lpWert() {
-  const roh = $('lpCode').value.trim();
-  if (!roh) { toast('Bitte den Lagerplatz scannen oder eintippen (z. B. H3.01.01.00.01).'); $('lpCode').setAttribute('aria-invalid', 'true'); $('lpCode').focus(); return ''; }
-  const [lp] = findLagerplatz(roh);
-  if (!lp) { toast(`„${roh}“ ist kein gültiger Lagerplatz. Richtig ist z. B. H3.01.01.00.01.`); $('lpCode').setAttribute('aria-invalid', 'true'); $('lpCode').focus(); return ''; }
-  $('lpCode').value = lp;
-  return lp;
+  const r = lpPruefen($('lpCode').value);
+  const falsch = msg => { toast(msg); $('lpCode').setAttribute('aria-invalid', 'true'); $('lpCode').focus(); return ''; };
+  if (r.fehler) return falsch(r.fehler);
+  if (r.neu && !lpNeuOk(r.lp)) { $('lpCode').focus(); return ''; }
+  if (r.neu) lpNameMerken(r.lp);
+  $('lpCode').value = r.lp; $('lpCode').removeAttribute('aria-invalid');
+  return r.lp;
 }
 function richtungWert() {
   const r = document.querySelector('input[name=richtung]:checked')?.value || '';
