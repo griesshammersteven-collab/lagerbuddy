@@ -390,7 +390,7 @@ body{overflow-wrap:break-word}
     <div class="f" id="lpRow" hidden>
       <label for="lpCode">Lagerplatz <span class="tag" id="t-lp"></span></label>
       <div class="lp-row">
-        <input id="lpCode" autocapitalize="characters" autocomplete="off" spellcheck="false" maxlength="20" placeholder="Lagerplatz scannen">
+        <input id="lpCode" autocapitalize="words" autocomplete="off" spellcheck="false" maxlength="40" placeholder="Scannen oder Name" list="lpNamen">
         <label class="btn" id="lpBtn">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 7V5a2 2 0 0 1 2-2h2"/><path d="M17 3h2a2 2 0 0 1 2 2v2"/><path d="M21 17v2a2 2 0 0 1-2 2h-2"/><path d="M7 21H5a2 2 0 0 1-2-2v-2"/><path d="M7 8v8"/><path d="M11 8v8"/><path d="M14 8v8"/><path d="M17 8v8"/></svg>
           Scannen<input class="file" type="file" accept="image/*" capture="environment" id="lpCam">
@@ -455,11 +455,12 @@ body{overflow-wrap:break-word}
       <ul id="pickList"></ul>
     </div>
   </div>
+  <datalist id="lpNamen"></datalist>
   <div id="lagerView" hidden>
     <p class="sync-state" id="lagerSync" role="status" hidden></p>
     <div class="card lager-info">
       <b>Einbuchen und Ausbuchen</b>
-      <p class="pick-hint">Gebinde-Etikett fotografieren, dann den Lagerplatz scannen und „Einbuchen“ (z. B. Wareneingang vom Lieferanten) oder „Ausbuchen“ wählen. Oder unten eine Bestandszeile antippen: für eine Pickliste entnehmen, umlagern oder ausbuchen.</p>
+      <p class="pick-hint">Gebinde-Etikett fotografieren, dann den Lagerplatz scannen (oder einen Namen wie „Bühl“ eintippen) und „Einbuchen“ (z. B. Wareneingang vom Lieferanten) oder „Ausbuchen“ wählen. Oder unten eine Bestandszeile antippen: für eine Pickliste entnehmen, umlagern oder ausbuchen.</p>
     </div>
     <section class="card lp-detail" id="lpDetail" hidden aria-labelledby="dtTitel">
       <div class="dt-kopf"><span class="lp-head" id="dtPlatz"></span><button class="btn dt-zu" type="button" id="dtZu" aria-label="Details schließen"><span aria-hidden="true">✕</span></button></div>
@@ -480,7 +481,7 @@ body{overflow-wrap:break-word}
       <div class="f" id="dtZielRow" hidden>
         <label for="dtZiel">Ziel-Lagerplatz</label>
         <div class="lp-row">
-          <input id="dtZiel" autocapitalize="characters" autocomplete="off" spellcheck="false" maxlength="20" placeholder="Ziel scannen">
+          <input id="dtZiel" autocapitalize="words" autocomplete="off" spellcheck="false" maxlength="40" placeholder="Scannen oder Name" list="lpNamen">
           <label class="btn" id="dtZielBtn">Scannen<input class="file" type="file" accept="image/*" capture="environment" id="dtZielCam"></label>
         </div>
       </div>
@@ -601,11 +602,11 @@ body{overflow-wrap:break-word}
 </div>
 <div id="toast" role="status" aria-live="polite"></div>
 
-<script src="parse.js?v=2026-09-27.1"></script>
-<script src="picks.js?v=2026-09-27.1"></script>
-<script src="app.js?v=2026-09-27.1"></script>
-<script src="lager.js?v=2026-09-27.1"></script>
-<script src="team.js?v=2026-09-27.1"></script>
-<script src="tour.js?v=2026-09-27.1"></script>
+<script src="parse.js?v=2026-09-29.1"></script>
+<script src="picks.js?v=2026-09-29.1"></script>
+<script src="app.js?v=2026-09-29.1"></script>
+<script src="lager.js?v=2026-09-29.1"></script>
+<script src="team.js?v=2026-09-29.1"></script>
+<script src="tour.js?v=2026-09-29.1"></script>
 </body>
 </html>

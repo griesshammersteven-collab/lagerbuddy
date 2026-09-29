@@ -212,7 +212,7 @@ end $$;
 create table if not exists public.lb_bewegungen (
   id text primary key,
   ts timestamptz not null,                  -- Zeitpunkt der Buchung auf dem Handy
-  lagerplatz text not null,                 -- z. B. H3.01.01.00.01
+  lagerplatz text not null,                 -- z. B. H3.01.01.00.01 oder ein Name wie Bühl
   artikel text not null,
   bez text not null default '',
   charge text not null default '',
@@ -236,7 +236,9 @@ language plpgsql immutable set search_path = public as $$
 begin
   if coalesce(jsonb_typeof(b), '') <> 'object' then return false; end if;
   if coalesce(jsonb_typeof(b -> 'id'), '') <> 'string' or length(b ->> 'id') not between 1 and 100 then return false; end if;
-  if coalesce(b ->> 'lagerplatz', '') !~ '^[A-Z][0-9]{1,3}(\.[0-9]{2}){4}$' then return false; end if;
+  -- Lagerplatz: Barcode-Schema H3.01.01.00.01 oder ein Name ohne Barcode wie "Bühl" (2 bis 40 Zeichen, wie LP_FREI in parse.js)
+  if coalesce(b ->> 'lagerplatz', '') !~ '^[A-Z][0-9]{1,3}(\.[0-9]{2}){4}$'
+     and coalesce(b ->> 'lagerplatz', '') !~ '^[A-Za-zÄÖÜäöüß0-9][A-Za-zÄÖÜäöüß0-9 ./_-]{0,38}[A-Za-zÄÖÜäöüß0-9.]$' then return false; end if;
   if coalesce(jsonb_typeof(b -> 'artikel'), '') <> 'string' or length(b ->> 'artikel') not between 1 and 64 then return false; end if;
   if length(coalesce(b ->> 'charge', '')) > 64 or length(coalesce(b ->> 'bez', '')) > 200
      or length(coalesce(b ->> 'picker', '')) > 20 or length(coalesce(b ->> 'pick_id', '')) > 64 then return false; end if;
